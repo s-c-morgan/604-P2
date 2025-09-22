@@ -1,0 +1,189 @@
+---
+title: "Brain Expression Analysis - Project 2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-packages}
+library(tidyverse)
+library(ggplot2)
+```
+
+## Load Data
+
+```{r load-data}
+load("brain.rda")
+
+cat("Available objects in workspace:\n")
+ls()
+
+cat("\nExpression data shape:", dim(expression), "\n")
+cat("Array metadata shape:", dim(arraymeta), "\n")
+cat("Gene metadata shape:", dim(genemeta), "\n")
+```
+
+## Explore Data Structure
+
+```{r explore-expression}
+cat("Expression data shape:", dim(expression), "\n")
+head(expression[1:8, 1:10])
+```
+
+```{r explore-arraymeta}
+cat("Array metadata shape:", dim(arraymeta), "\n")
+arraymeta[arraymeta$patient == '1834', ]
+```
+
+## Age Distribution Analysis
+
+```{r age-analysis}
+age_array <- arraymeta$age
+unique_patients <- arraymeta[!duplicated(arraymeta$patient), ]
+unique_age_array <- unique_patients$age
+
+# Create age histogram
+ggplot() +
+  geom_histogram(aes(x = age_array, fill = "samples"),
+                 alpha = 0.7, color = "black", bins = 20) +
+  geom_histogram(aes(x = unique_age_array, fill = "individual"),
+                 alpha = 0.7, color = "black", bins = 20) +
+  geom_vline(xintercept = 70, color = "red", linewidth = 1) +
+  labs(x = "Age", y = "Count", fill = "Type") +
+  scale_fill_manual(values = c("samples" = "lightblue", "individual" = "darkblue")) +
+  theme_minimal() +
+  annotate("text", x = 72, y = max(table(age_array)) * 0.8,
+           label = "age = 70", color = "red")
+
+ggsave("age_hist.pdf", width = 8, height = 6, dpi = 300)
+```
+
+```{r patients-under-70}
+unique_patients[unique_patients$age < 70, ]
+```
+
+## Sex Distribution
+
+```{r sex-distribution}
+sex_counts <- table(arraymeta$sex)
+barplot(sex_counts, main = "Sex Distribution", ylab = "Count",
+        col = c("lightcoral", "lightblue"))
+```
+
+## Gene Metadata
+
+```{r gene-metadata}
+head(genemeta[, 1:10])
+```
+
+## Preprocessing
+
+Split data by brain regions and age groups:
+
+```{r preprocessing}
+head(arraymeta)
+```
+
+### Split by Regions
+
+```{r split-regions}
+# Cerebellum (cb) - use logical indexing directly
+cb_mask <- arraymeta$region.cb == 1
+cb_arraymeta <- arraymeta[cb_mask, ]
+cb_expression <- expression[cb_mask, ]
+
+# Anterior cingulate (ancg)
+ancg_mask <- arraymeta$region.ancg == 1
+ancg_arraymeta <- arraymeta[ancg_mask, ]
+ancg_expression <- expression[ancg_mask, ]
+
+# Dorsolateral prefrontal cortex (dlpfc)
+dlpfc_mask <- arraymeta$region.dlpfc == 1
+dlpfc_arraymeta <- arraymeta[dlpfc_mask, ]
+dlpfc_expression <- expression[dlpfc_mask, ]
+
+cat("cb:", nrow(cb_arraymeta), "rows\n")
+cat("ancg:", nrow(ancg_arraymeta), "rows\n")
+cat("dlpfc:", nrow(dlpfc_arraymeta), "rows\n")
+```
+
+### Create Age-Region Splits
+
+```{r age-region-splits}
+regions <- list(
+  'cb' = 'region.cb',
+  'ancg' = 'region.ancg',
+  'dlpfc' = 'region.dlpfc'
+)
+
+splits <- list()
+
+for (short in names(regions)) {
+  col <- regions[[short]]
+  in_region <- arraymeta[[col]] == 1
+  is_70plus <- arraymeta$age >= 70
+
+  # Create logical masks for the combinations
+  mask_70plus <- in_region & is_70plus
+  mask_u70 <- in_region & !is_70plus
+
+  # Use logical indexing to subset both dataframes
+  splits[[paste(short, '70+', sep='_')]] <- cbind(
+    arraymeta[mask_70plus, ],
+    expression[mask_70plus, ]
+  )
+  splits[[paste(short, '70-', sep='_')]] <- cbind(
+    arraymeta[mask_u70, ],
+    expression[mask_u70, ]
+  )
+
+  cat(sprintf("%-6s 70+: %4d rows | 70-: %4d rows\n",
+              short, sum(mask_70plus), sum(mask_u70)))
+}
+```
+
+### Examine ANCG 70+ Group
+
+```{r ancg-70plus}
+head(splits[['ancg_70+']])
+```
+
+### Lab Distribution by Region and Age
+
+```{r lab-distribution-cb}
+cat("CB 70- lab distribution:\n")
+cat("Davis:", sum(splits[['cb_70-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['cb_70-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['cb_70-']]$lab.michigan), "\n")
+
+cat("\nCB 70+ lab distribution:\n")
+cat("Davis:", sum(splits[['cb_70+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['cb_70+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['cb_70+']]$lab.michigan), "\n")
+```
+
+```{r lab-distribution-ancg}
+cat("ANCG 70- lab distribution:\n")
+cat("Davis:", sum(splits[['ancg_70-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['ancg_70-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['ancg_70-']]$lab.michigan), "\n")
+
+cat("\nANCG 70+ lab distribution:\n")
+cat("Davis:", sum(splits[['ancg_70+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['ancg_70+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['ancg_70+']]$lab.michigan), "\n")
+```
+
+```{r lab-distribution-dlpfc}
+cat("DLPFC 70- lab distribution:\n")
+cat("Davis:", sum(splits[['dlpfc_70-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['dlpfc_70-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['dlpfc_70-']]$lab.michigan), "\n")
+
+cat("\nDLPFC 70+ lab distribution:\n")
+cat("Davis:", sum(splits[['dlpfc_70+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['dlpfc_70+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['dlpfc_70+']]$lab.michigan), "\n")
+```
