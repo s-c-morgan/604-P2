@@ -10,7 +10,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r load-packages}
 library(tidyverse)
 library(ggplot2)
+library(lme4)
+library(fixest)
 ```
+
+# Preliminary Data Analysis
 
 ## Load Data
 
@@ -186,4 +190,91 @@ cat("\nDLPFC 70+ lab distribution:\n")
 cat("Davis:", sum(splits[['dlpfc_70+']]$lab.davis), "\n")
 cat("Irvine:", sum(splits[['dlpfc_70+']]$lab.irvine), "\n")
 cat("Michigan:", sum(splits[['dlpfc_70+']]$lab.michigan), "\n")
+```
+
+# Model Fitting and Results
+
+## Linear Regression with Fixed Effects
+```{r}
+# Convert region indicator variables to categorical labels
+region <- arraymeta %>%
+    dplyr::select(region.ancg, region.cb, region.dlpfc) %>%
+    max.col %>%  # Returns column index for each row
+    as.character  # Convert to character labels
+
+# Convert lab indicator variables to categorical labels
+lab <- arraymeta %>%
+    dplyr::select(lab.davis, lab.irvine, lab.michigan) %>%
+    max.col %>%  # Returns column index for each row
+    as.character  # Convert to character labels
+
+# Create final covariate dataset
+covariates <- arraymeta %>%
+    dplyr::select(patient, age, sex, arrayversion) %>%  # Select base covariates
+    dplyr::mutate(lab = lab, region = region) %>%  # Add categorical lab and region
+    dplyr::mutate(age.indicator = ifelse(age > 70, 1, 0))  # Binary age indicator
+
+# Filter genes with chromosome information
+is.gene <- !is.na(genemeta["chrom",])
+# Subset expression data to valid genes
+expression.used <- expression[ ,is.gene]
+# Rename gene columns for modeling
+colnames(expression.used) <- paste0("gene", 1:sum(is.gene))
+# Get dependent variable names
+dep.used <- unname(colnames(expression.used))
+# Combine data for modeling
+df <- cbind(covariates, expression.used)
+
+# Fit fixed effects regression for all genes
+mod <- fixest::feols(.[dep.used] ~ age.indicator |  sex + arrayversion + lab + region, df)
+```
+
+## Results
+```{r}
+# Generate compact summary with robust standard errors
+result.summary <- summary(mod, "compact", se = "hetero")
+# Add gene symbols to results
+result.summary$lhs <- genemeta["sym", is.gene]
+```
+
+### Order by Age Indicator Significance
+```{r}
+# Extract coefficients and standard errors from model object directly
+coefs <- coef(mod)[,"age.indicator"]
+se <- se(mod, se = "hetero")[,"age.indicator"]
+# Calculate t-statistics (significance measure)
+t_stats <- abs(coefs / se)
+# Create ordered results dataframe
+ordered_results <- data.frame(
+  gene_symbol = genemeta["sym", is.gene],
+  coefficient = coefs,
+  std_error = se,
+  t_statistic = t_stats,
+  stringsAsFactors = FALSE
+)
+# Order by t-statistic (highest significance first)
+ordered_results <- ordered_results[order(t_stats, decreasing = TRUE), ]
+# Display top 20 most significant genes
+head(ordered_results, 20)
+```
+
+### Distribution of Age Indicator Effects
+```{r}
+# Histogram of coefficients
+ggplot(data.frame(coef = coefs), aes(x = coef)) +
+  geom_histogram(bins = 50, fill = "lightblue", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Age Indicator Coefficients",
+       x = "Coefficient", y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+# Histogram of t-statistics of age coefficients in each gene's regression
+ggplot(data.frame(t_stat = t_stats), aes(x = t_stat)) +
+  geom_histogram(bins = 50, fill = "lightcoral", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 1.96, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Age Indicator T-statistics",
+       x = "Absolute T-statistic", y = "Count") +
+  theme_minimal()
 ```
