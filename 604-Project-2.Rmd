@@ -542,6 +542,14 @@ region_results[[region_name]] <- data.frame(
 }
 ```
 
+## Region specific volcano plots
+```{r volcano-region}
+  region_results[[0]]
+
+
+
+```
+
 ## Compare Results Across Regions
 ```{r compare-regions}
 # Combine all region results
