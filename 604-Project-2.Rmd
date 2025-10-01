@@ -162,6 +162,67 @@ ggplot(sex_data, aes(x = Sex, y = Count, fill = Type)) +
 head(genemeta[, 1:10])
 ```
 
+## Gene Expression NA Analysis
+
+```{r gene-expression-na-analysis}
+# Check for NA values in the expression matrix
+total_values <- nrow(expression) * ncol(expression)
+na_count <- sum(is.na(expression))
+na_percentage <- round(100 * na_count / total_values, 4)
+
+cat("Gene Expression NA Analysis:\n")
+cat("Total values in expression matrix:", total_values, "\n")
+cat("Number of NA values:", na_count, "\n")
+cat("Percentage of NA values:", na_percentage, "%\n")
+
+if(na_count > 0) {
+  # Find which rows (samples) have NAs
+  rows_with_na <- apply(expression, 1, function(row) any(is.na(row)))
+  cat("\nSamples with NA values:", sum(rows_with_na), "out of", nrow(expression), "\n")
+
+  # Find which columns (genes) have NAs
+  cols_with_na <- apply(expression, 2, function(col) any(is.na(col)))
+  cat("Genes with NA values:", sum(cols_with_na), "out of", ncol(expression), "\n")
+
+  if(sum(rows_with_na) > 0) {
+    cat("\nRow indices with NA values:\n")
+    print(which(rows_with_na))
+
+    # Show metadata for samples with NAs
+    cat("\nMetadata for samples with NA values:\n")
+    na_sample_metadata <- arraymeta[rows_with_na, c("patient", "age", "sex", "region.cb", "region.ancg", "region.dlpfc")]
+    print(na_sample_metadata)
+  }
+
+  if(sum(cols_with_na) > 0) {
+    cat("\nColumn indices with NA values (first 20):\n")
+    na_col_indices <- which(cols_with_na)
+    print(head(na_col_indices, 20))
+
+    # Show gene names if available
+    if(exists("genemeta") && nrow(genemeta) > 0) {
+      gene_names <- colnames(expression)[na_col_indices]
+      cat("\nGene names with NA values (first 20):\n")
+      print(head(gene_names, 20))
+    }
+  }
+
+  # Summary by NA pattern
+  cat("\nNA pattern summary:\n")
+  na_per_row <- rowSums(is.na(expression))
+  na_per_col <- colSums(is.na(expression))
+
+  cat("Samples with different numbers of NA genes:\n")
+  print(table(na_per_row))
+
+  cat("\nDistribution of NA counts per gene:\n")
+  print(summary(na_per_col))
+
+} else {
+  cat("\nNo NA values found in the expression data.\n")
+}
+```
+
 ## Preprocessing
 
 Split data by brain regions and age groups:
