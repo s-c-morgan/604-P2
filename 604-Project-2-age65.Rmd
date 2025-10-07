@@ -22,6 +22,7 @@ library(gridExtra)
 
 ```{r load-data}
 load("brain.rda")
+
 cat("Available objects in workspace:\n")
 ls()
 
