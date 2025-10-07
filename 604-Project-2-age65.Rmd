@@ -1,0 +1,1006 @@
+---
+title: "Brain Expression Analysis - Project 2 (Age 65+ vs <65)"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-packages}
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(fixest)
+library(grid)
+library(gridExtra)
+```
+
+# Preliminary Data Analysis
+
+## Load Data
+
+```{r load-data}
+load("brain.rda")
+cat("Available objects in workspace:\n")
+ls()
+
+cat("\nExpression data shape:", dim(expression), "\n")
+cat("Array metadata shape:", dim(arraymeta), "\n")
+cat("Gene metadata shape:", dim(genemeta), "\n")
+```
+
+## Explore Data Structure
+
+```{r explore-expression}
+cat("Expression data shape:", dim(expression), "\n")
+head(expression[1:8, 1:10])
+```
+
+```{r explore-arraymeta}
+cat("Array metadata shape:", dim(arraymeta), "\n")
+arraymeta[arraymeta$patient == '1834', ]
+```
+
+## Age Distribution Analysis
+
+```{r age-analysis}
+age_array <- arraymeta$age
+unique_patients <- arraymeta[!duplicated(arraymeta$patient), ]
+unique_age_array <- unique_patients$age
+
+# Create age histogram
+ggplot() +
+  geom_histogram(aes(x = age_array, fill = "samples"),
+                 alpha = 0.7, color = "black", bins = 20) +
+  geom_histogram(aes(x = unique_age_array, fill = "individuals"),
+                 alpha = 0.7, color = "black", bins = 20) +
+  labs(x = "Age", y = "Count", fill = "Type") +
+  scale_fill_manual(values = c("samples" = "lightblue", "individuals" = "darkblue")) +
+  scale_x_continuous(breaks = seq(0, 100, 10)) +
+  theme_minimal()
+
+ggsave("age_hist_65.pdf", width = 8, height = 6, dpi = 300)
+```
+
+```{r patients-under-65}
+unique_patients[unique_patients$age < 65, ]
+```
+
+## AFFX Zero Value Analysis
+
+```{r affx-zero-analysis}
+# Find all AFFX columns in the expression data
+affx_cols <- grep("^AFFX", colnames(expression), value = TRUE)
+cat("Found", length(affx_cols), "AFFX columns:\n")
+print(affx_cols)
+
+# Check for zero values in any AFFX column
+if(length(affx_cols) > 0) {
+  # Extract AFFX expression data
+  affx_data <- expression[, affx_cols, drop = FALSE]
+
+  # Find observations (rows) where ANY AFFX column has zero value
+  zero_affx_rows <- apply(affx_data, 1, function(row) any(row == 0))
+
+  cat("\nNumber of observations with zero in any AFFX column:", sum(zero_affx_rows), "\n")
+  cat("Total observations:", nrow(expression), "\n")
+  cat("Percentage with zero AFFX:", round(100 * sum(zero_affx_rows) / nrow(expression), 2), "%\n")
+
+  if(sum(zero_affx_rows) > 0) {
+    # Get the observation indices and metadata for problematic rows
+    zero_affx_indices <- which(zero_affx_rows)
+
+    cat("\nObservations with zero AFFX values:\n")
+
+    # Create summary table with metadata and which AFFX columns are zero
+    zero_summary <- data.frame(
+      Row_Index = zero_affx_indices,
+      Patient = arraymeta$patient[zero_affx_indices],
+      Age = arraymeta$age[zero_affx_indices],
+      Sex = arraymeta$sex[zero_affx_indices],
+      Region_CB = arraymeta$region.cb[zero_affx_indices],
+      Region_ANCG = arraymeta$region.ancg[zero_affx_indices],
+      Region_DLPFC = arraymeta$region.dlpfc[zero_affx_indices],
+      stringsAsFactors = FALSE
+    )
+
+    # Add columns showing which AFFX values are zero for each observation
+    for(col in affx_cols) {
+      zero_summary[[paste0(col, "_is_zero")]] <- affx_data[zero_affx_indices, col] == 0
+    }
+
+    print(zero_summary)
+
+    # Show the actual AFFX values for the problematic observations
+    cat("\nActual AFFX values for these observations:\n")
+    problematic_affx <- affx_data[zero_affx_indices, , drop = FALSE]
+    rownames(problematic_affx) <- zero_affx_indices
+    print(problematic_affx)
+
+  } else {
+    cat("\nNo observations found with zero AFFX values.\n")
+  }
+
+} else {
+  cat("\nNo AFFX columns found in the expression data.\n")
+}
+```
+
+## Sex Distribution
+
+```{r sex-distribution}
+sex_array <- arraymeta$sex
+unique_patients <- arraymeta[!duplicated(arraymeta$patient), ]
+unique_sex_array <- unique_patients$sex
+
+# Create sex distribution data
+sex_samples <- table(sex_array)
+sex_individuals <- table(unique_sex_array)
+
+# Create data frame for plotting
+sex_data <- data.frame(
+  Sex = rep(names(sex_samples), 2),
+  Count = c(as.numeric(sex_samples), as.numeric(sex_individuals)),
+  Type = rep(c("samples", "individuals"), each = length(sex_samples))
+)
+
+# Create bar chart
+ggplot(sex_data, aes(x = Sex, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7, color = "black") +
+  labs(x = "Sex", y = "Count", fill = "Type") +
+  scale_fill_manual(values = c("samples" = "lightcoral", "individuals" = "darkred")) +
+  theme_minimal() +
+  geom_text(aes(label = Count), position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 3)
+```
+
+## Gene Metadata
+
+```{r gene-metadata}
+head(genemeta[, 1:10])
+```
+
+## Gene Expression NA Analysis
+
+```{r gene-expression-na-analysis}
+# Check for NA values in the expression matrix
+total_values <- nrow(expression) * ncol(expression)
+na_count <- sum(is.na(expression))
+na_percentage <- round(100 * na_count / total_values, 4)
+
+cat("Gene Expression NA Analysis:\n")
+cat("Total values in expression matrix:", total_values, "\n")
+cat("Number of NA values:", na_count, "\n")
+cat("Percentage of NA values:", na_percentage, "%\n")
+
+if(na_count > 0) {
+  # Find which rows (samples) have NAs
+  rows_with_na <- apply(expression, 1, function(row) any(is.na(row)))
+  cat("\nSamples with NA values:", sum(rows_with_na), "out of", nrow(expression), "\n")
+
+  # Find which columns (genes) have NAs
+  cols_with_na <- apply(expression, 2, function(col) any(is.na(col)))
+  cat("Genes with NA values:", sum(cols_with_na), "out of", ncol(expression), "\n")
+
+  if(sum(rows_with_na) > 0) {
+    cat("\nRow indices with NA values:\n")
+    print(which(rows_with_na))
+
+    # Show metadata for samples with NAs
+    cat("\nMetadata for samples with NA values:\n")
+    na_sample_metadata <- arraymeta[rows_with_na, c("patient", "age", "sex", "region.cb", "region.ancg", "region.dlpfc")]
+    print(na_sample_metadata)
+  }
+
+  if(sum(cols_with_na) > 0) {
+    cat("\nColumn indices with NA values (first 20):\n")
+    na_col_indices <- which(cols_with_na)
+    print(head(na_col_indices, 20))
+
+    # Show gene names if available
+    if(exists("genemeta") && nrow(genemeta) > 0) {
+      gene_names <- colnames(expression)[na_col_indices]
+      cat("\nGene names with NA values (first 20):\n")
+      print(head(gene_names, 20))
+    }
+  }
+
+  # Summary by NA pattern
+  cat("\nNA pattern summary:\n")
+  na_per_row <- rowSums(is.na(expression))
+  na_per_col <- colSums(is.na(expression))
+
+  cat("Samples with different numbers of NA genes:\n")
+  print(table(na_per_row))
+
+  cat("\nDistribution of NA counts per gene:\n")
+  print(summary(na_per_col))
+
+} else {
+  cat("\nNo NA values found in the expression data.\n")
+}
+```
+
+## Preprocessing
+
+Split data by brain regions and age groups:
+
+```{r preprocessing}
+head(arraymeta)
+```
+
+### Split by Regions
+
+```{r split-regions}
+# Cerebellum (cb) - use logical indexing directly
+cb_mask <- arraymeta$region.cb == 1
+cb_arraymeta <- arraymeta[cb_mask, ]
+cb_expression <- expression[cb_mask, ]
+
+# Anterior cingulate (ancg)
+ancg_mask <- arraymeta$region.ancg == 1
+ancg_arraymeta <- arraymeta[ancg_mask, ]
+ancg_expression <- expression[ancg_mask, ]
+
+# Dorsolateral prefrontal cortex (dlpfc)
+dlpfc_mask <- arraymeta$region.dlpfc == 1
+dlpfc_arraymeta <- arraymeta[dlpfc_mask, ]
+dlpfc_expression <- expression[dlpfc_mask, ]
+
+cat("cb:", nrow(cb_arraymeta), "rows\n")
+cat("ancg:", nrow(ancg_arraymeta), "rows\n")
+cat("dlpfc:", nrow(dlpfc_arraymeta), "rows\n")
+```
+
+### Create Age-Region Splits
+
+```{r age-region-splits}
+regions <- list(
+  'cb' = 'region.cb',
+  'ancg' = 'region.ancg',
+  'dlpfc' = 'region.dlpfc'
+)
+
+splits <- list()
+
+for (short in names(regions)) {
+  col <- regions[[short]]
+  in_region <- arraymeta[[col]] == 1
+  is_65plus <- arraymeta$age >= 65
+
+  # Create logical masks for the combinations
+  mask_65plus <- in_region & is_65plus
+  mask_u65 <- in_region & !is_65plus
+
+  # Use logical indexing to subset both dataframes
+  splits[[paste(short, '65+', sep='_')]] <- cbind(
+    arraymeta[mask_65plus, ],
+    expression[mask_65plus, ]
+  )
+  splits[[paste(short, '65-', sep='_')]] <- cbind(
+    arraymeta[mask_u65, ],
+    expression[mask_u65, ]
+  )
+
+  cat(sprintf("%-6s 65+: %4d rows | 65-: %4d rows\n",
+              short, sum(mask_65plus), sum(mask_u65)))
+}
+```
+
+### Examine ANCG 65+ Group
+
+```{r ancg-65plus}
+head(splits[['ancg_65+']])
+```
+
+### Lab Distribution by Region and Age
+
+```{r lab-distribution-cb}
+cat("CB 65- lab distribution:\n")
+cat("Davis:", sum(splits[['cb_65-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['cb_65-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['cb_65-']]$lab.michigan), "\n")
+
+cat("\nCB 65+ lab distribution:\n")
+cat("Davis:", sum(splits[['cb_65+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['cb_65+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['cb_65+']]$lab.michigan), "\n")
+```
+
+```{r lab-distribution-ancg}
+cat("ANCG 65- lab distribution:\n")
+cat("Davis:", sum(splits[['ancg_65-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['ancg_65-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['ancg_65-']]$lab.michigan), "\n")
+
+cat("\nANCG 65+ lab distribution:\n")
+cat("Davis:", sum(splits[['ancg_65+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['ancg_65+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['ancg_65+']]$lab.michigan), "\n")
+```
+
+```{r lab-distribution-dlpfc}
+cat("DLPFC 65- lab distribution:\n")
+cat("Davis:", sum(splits[['dlpfc_65-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['dlpfc_65-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['dlpfc_65-']]$lab.michigan), "\n")
+
+cat("\nDLPFC 65+ lab distribution:\n")
+cat("Davis:", sum(splits[['dlpfc_65+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['dlpfc_65+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['dlpfc_65+']]$lab.michigan), "\n")
+```
+
+## Consolidated Lab Distribution Table
+
+```{r lab-distribution-table}
+# Create consolidated lab distribution table
+lab_distribution <- data.frame(
+  Region = character(),
+  Age_Group = character(),
+  Davis = numeric(),
+  Irvine = numeric(),
+  Michigan = numeric(),
+  Total = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Define regions and age groups
+regions_list <- c('cb', 'ancg', 'dlpfc')
+age_groups <- c('65-', '65+')
+
+# Loop through each combination and collect data
+for(region in regions_list) {
+  for(age_group in age_groups) {
+    split_name <- paste(region, age_group, sep='_')
+
+    davis_count <- sum(splits[[split_name]]$lab.davis)
+    irvine_count <- sum(splits[[split_name]]$lab.irvine)
+    michigan_count <- sum(splits[[split_name]]$lab.michigan)
+    total_count <- davis_count + irvine_count + michigan_count
+
+    # Add row to table
+    lab_distribution <- rbind(lab_distribution, data.frame(
+      Region = toupper(region),
+      Age_Group = age_group,
+      Davis = davis_count,
+      Irvine = irvine_count,
+      Michigan = michigan_count,
+      Total = total_count
+    ))
+  }
+}
+
+# Display the consolidated table
+cat("Lab Distribution by Region and Age Group:\n")
+print(lab_distribution)
+
+# Create a more formatted version
+library(knitr)
+kable(lab_distribution,
+      caption = "Lab Distribution by Brain Region and Age Group",
+      align = c('l', 'c', 'c', 'c', 'c', 'c'))
+```
+
+# Model Fitting and Results
+
+## Linear Regression with Fixed Effects
+```{r}
+# Convert region indicator variables to categorical labels
+region <- arraymeta %>%
+    dplyr::select(region.ancg, region.cb, region.dlpfc) %>%
+    max.col %>%  # Returns column index for each row
+    as.character  # Convert to character labels
+
+# Convert lab indicator variables to categorical labels
+lab <- arraymeta %>%
+    dplyr::select(lab.davis, lab.irvine, lab.michigan) %>%
+    max.col %>%  # Returns column index for each row
+    as.character  # Convert to character labels
+
+# Create final covariate dataset
+covariates <- arraymeta %>%
+    dplyr::select(patient, age, sex, arrayversion) %>%  # Select base covariates
+    dplyr::mutate(lab = lab, region = region) %>%  # Add categorical lab and region
+    dplyr::mutate(age.indicator = ifelse(age > 65, 1, 0))  # Binary age indicator
+
+# Filter genes with chromosome information
+is.gene <- !is.na(genemeta["chrom",])
+# Subset expression data to valid genes
+expression.used <- expression[ ,is.gene]
+# Rename gene columns for modeling
+colnames(expression.used) <- paste0("gene", 1:sum(is.gene))
+# Get dependent variable names
+dep.used <- unname(colnames(expression.used))
+# Combine data for modeling
+df <- cbind(covariates, expression.used)
+
+# Fit fixed effects regression for all genes
+mod <- fixest::feols(.[dep.used] ~ age.indicator |  sex + arrayversion + lab + region, df)
+```
+
+## Results
+```{r}
+# Generate compact summary with robust standard errors
+result.summary <- summary(mod, "compact", se = "hetero")
+# Add gene symbols to results
+result.summary$lhs <- genemeta["sym", is.gene]
+```
+
+### Order by Age Indicator Significance
+```{r}
+# Extract coefficients and standard errors from model object directly
+coefs <- coef(mod)[,"age.indicator"]
+se <- se(mod, se = "hetero")[,"age.indicator"]
+# Calculate t-statistics (significance measure)
+t_stats <- abs(coefs / se)
+# Create ordered results dataframe
+ordered_results <- data.frame(
+  gene_symbol = genemeta["sym", is.gene],
+  coefficient = coefs,
+  std_error = se,
+  t_statistic = t_stats,
+  stringsAsFactors = FALSE
+)
+# Order by t-statistic (highest significance first)
+ordered_results <- ordered_results[order(t_stats, decreasing = TRUE), ]
+# Display top 20 most significant genes
+head(ordered_results, 20)
+```
+
+### Distribution of Age Indicator Effects
+```{r}
+# Histogram of coefficients
+ggplot(data.frame(coef = coefs), aes(x = coef)) +
+  geom_histogram(bins = 50, fill = "lightblue", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Age Indicator Coefficients",
+       x = "Coefficient", y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+# Histogram of t-statistics of age coefficients in each gene's regression
+ggplot(data.frame(t_stat = t_stats), aes(x = t_stat)) +
+  geom_histogram(bins = 50, fill = "lightcoral", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 1.96, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Age Indicator T-statistics",
+       x = "Absolute T-statistic", y = "Count") +
+  theme_minimal()
+```
+
+## Region-Specific Regression Analysis
+```{r region-specific-analysis}
+# Create region-specific datasets
+regions <- c("ANCG", "CB", "DLPFC")
+region_results <- list()
+
+for(region_name in regions) {
+  cat("\n=== Analyzing", region_name, "===\n")
+
+  # Filter data for this region
+  if(region_name == "ANCG") {
+    region_mask <- covariates$region == "1"
+  } else if(region_name == "CB") {
+    region_mask <- covariates$region == "2"
+  } else if(region_name == "DLPFC") {
+    region_mask <- covariates$region == "3"
+  }
+
+  # Create region-specific datasets
+  region_covariates <- covariates[region_mask, ]
+  region_expression <- expression.used[region_mask, ]
+
+  cat("Sample size:", nrow(region_covariates), "\n")
+  cat("Age distribution:", table(region_covariates$age.indicator), "\n")
+
+  # Combine data for modeling
+  region_df <- cbind(region_covariates, region_expression)
+
+  # Fit regression for this region (without region as covariate)
+  region_mod <- fixest::feols(.[dep.used] ~ age.indicator | sex + arrayversion + lab, region_df)
+
+  # Extract results
+  region_coefs <- coef(region_mod)[,"age.indicator"]
+  region_se <- se(region_mod, se = "hetero")[,"age.indicator"]
+  region_t_stats <- abs(region_coefs / region_se)
+  region_pvalues <- pvalue(region_mod)[,"age.indicator"]
+
+  # Calculate effect sizes for this region
+  region_effect_sizes <- numeric(length(region_coefs))
+  for(i in 1:length(region_coefs)) {
+    older_samples <- region_covariates$age >= 65
+    younger_samples <- region_covariates$age < 65
+
+    if(sum(older_samples) > 0 & sum(younger_samples) > 0) {
+      older_mean <- mean(region_expression[older_samples, i], na.rm = TRUE)
+      younger_mean <- mean(region_expression[younger_samples, i], na.rm = TRUE)
+      region_effect_sizes[i] <- older_mean - younger_mean
+    } else {
+      region_effect_sizes[i] <- NA
+    }
+  }
+
+# Store results
+region_results[[region_name]] <- data.frame(
+  gene_symbol = genemeta["sym", is.gene],
+  coefficient = region_coefs,
+  std_error = region_se,
+  t_statistic = region_t_stats,
+  p_value = region_pvalues,
+  effect_size = region_effect_sizes,
+  region = region_name,
+  stringsAsFactors = FALSE
+)
+
+  # Print top 10 genes for this region
+  top_genes_region <- region_results[[region_name]][order(region_t_stats, decreasing = TRUE), ][1:10, ]
+  cat("Top 10 genes in", region_name, ":\n")
+  print(top_genes_region[, c("gene_symbol", "t_statistic", "effect_size")])
+}
+```
+
+## Region specific volcano plots
+```{r volcano-region}
+# Volcano plots code can be added here if needed
+
+
+
+```
+
+## Compare Results Across Regions
+```{r compare-regions}
+# Combine all region results
+all_region_results <- do.call(rbind, region_results)
+
+# Find genes that are significant in multiple regions using p-value
+p_threshold <- 0.05
+sig_genes_by_region <- list()
+
+for(region_name in regions) {
+  region_data <- region_results[[region_name]]
+  sig_genes_by_region[[region_name]] <- region_data$gene_symbol[region_data$p_value < p_threshold & !is.na(region_data$p_value)]
+  cat(region_name, "- Significant genes (p < 0.05):", length(sig_genes_by_region[[region_name]]), "\n")
+}
+
+# Find overlapping significant genes
+common_genes <- Reduce(intersect, sig_genes_by_region)
+cat("\nGenes significant in ALL regions:", length(common_genes), "\n")
+if(length(common_genes) > 0) {
+  print(head(common_genes, 20))
+}
+
+# Find region-specific genes (significant in only one region)
+region_specific_genes <- list()
+for(region_name in regions) {
+  other_regions <- regions[regions != region_name]
+  other_sig_genes <- unique(unlist(sig_genes_by_region[other_regions]))
+  region_specific <- setdiff(sig_genes_by_region[[region_name]], other_sig_genes)
+  region_specific_genes[[region_name]] <- region_specific
+
+  cat("\n", region_name, "- specific genes:", length(region_specific), "\n")
+  if(length(region_specific) > 0) {
+    print(head(region_specific, 10))
+  }
+}
+```
+
+## Scatter Plot 1: Top 4 Genes from Each Region (4x3 grid)
+```{r top-genes-by-region-scatter}
+# Get top 4 genes from each region
+regional_top_genes <- list()
+for(region_name in regions) {
+  region_data <- region_results[[region_name]]
+  top_4 <- head(region_data[order(region_data$p_value), ], 4)
+  regional_top_genes[[region_name]] <- top_4
+}
+
+# Create plots organized by region (columns)
+regional_plots <- list()
+
+# Create plots in column-wise order (region by region)
+for(col in 1:3) {  # 3 regions (columns)
+  region_name <- regions[col]
+  top_genes <- regional_top_genes[[region_name]]
+
+  for(row in 1:4) {  # 4 genes per region (rows)
+    gene_name <- top_genes$gene_symbol[row]
+    p_value <- top_genes$p_value[row]
+    effect_size <- top_genes$effect_size[row]
+
+    # Find gene index in original expression data
+    gene_symbols <- genemeta["sym", is.gene]
+    gene_idx <- which(gene_symbols == gene_name)
+
+    # Check if gene was found
+    if(length(gene_idx) == 0) {
+      cat("Warning: Gene", gene_name, "not found in expression data\n")
+      next
+    }
+
+    # Take the first match if multiple matches found
+    if(length(gene_idx) > 1) {
+      gene_idx <- gene_idx[1]
+    }
+
+    # Make sure we have the right column
+    if(gene_idx > ncol(expression.used)) {
+      cat("Warning: Gene index", gene_idx, "exceeds number of columns\n")
+      next
+    }
+
+    plot_data <- data.frame(
+      Expression = expression.used[, gene_idx],
+      Region = case_when(
+        covariates$region == "1" ~ "ANCG",
+        covariates$region == "2" ~ "CB",
+        covariates$region == "3" ~ "DLPFC"
+      ),
+      Age_Group = ifelse(covariates$age >= 65, "65+", "<65")
+    )
+
+    # Check if plot_data was created successfully
+    if(nrow(plot_data) == 0 || any(is.na(plot_data$Expression))) {
+      cat("Warning: No valid data available for gene", gene_name, "\n")
+      next
+    }
+
+    # Create title based on ranking
+    rank_text <- c("1st", "2nd", "3rd", "4th")[row]
+
+    p <- ggplot(plot_data, aes(x = Region, y = Expression, fill = Age_Group)) +
+      geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+      geom_point(aes(color = Age_Group), position = position_jitterdodge(jitter.width = 0.2),
+                 alpha = 0.6, size = 1.0) +
+      scale_fill_manual(values = c("65+" = "#e74c3c", "<65" = "#3498db")) +
+      scale_color_manual(values = c("65+" = "#c0392b", "<65" = "#2980b9")) +
+      labs(title = paste0(rank_text, " in ", region_name, ": ", gene_name),
+           subtitle = paste0("p = ", format(p_value, scientific = TRUE, digits = 2)),
+           x = if(row == 4) "Brain Region" else "",  # Only show x-label on bottom row
+           y = if(col == 1) "Expression Level" else "") +  # Only show y-label on left column
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 10, hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(size = 8, hjust = 0.5, color = "gray60"),
+        legend.position = "none",
+        axis.text.x = element_text(size = 8, angle = if(row < 4) 0 else 0),
+        axis.text.y = element_text(size = 8),
+        axis.title.x = element_text(size = 9),
+        axis.title.y = element_text(size = 9),
+        panel.grid.minor = element_blank()
+      )
+
+    # Calculate plot position in the list (column-wise filling)
+    plot_position <- (col - 1) * 4 + row
+    regional_plots[[plot_position]] <- p
+  }
+}
+
+# Add column headers using textGrob
+library(grid)
+library(gridExtra)
+
+# Check if we have plots to arrange
+if(length(regional_plots) >= 12) {
+  # Arrange in 4x3 grid with headers
+  combined_regional <- grid.arrange(
+    # Row 1
+    regional_plots[[1]], regional_plots[[5]], regional_plots[[9]],
+    # Row 2
+    regional_plots[[2]], regional_plots[[6]], regional_plots[[10]],
+    # Row 3
+    regional_plots[[3]], regional_plots[[7]], regional_plots[[11]],
+    # Row 4
+    regional_plots[[4]], regional_plots[[8]], regional_plots[[12]],
+    ncol = 3, nrow = 4,
+    heights = c(1, 1, 1, 1)  # Header row is smaller
+  )
+
+  # Save the combined plot
+  ggsave("top_4_genes_by_region_4x3_age65.pdf", combined_regional, width = 18, height = 16, dpi = 300)
+  cat("Successfully created 4x3 grid with top 4 genes per region\n")
+} else {
+  cat("Not enough plots created - check gene names and data\n")
+  cat("Created", length(regional_plots), "plots\n")
+}
+
+# Print summary
+cat("\n=== 4x3 Plot Summary ===\n")
+for(region_name in regions) {
+  cat("\n", region_name, " top 4 genes:\n")
+  top_genes <- regional_top_genes[[region_name]]
+  for(i in 1:4) {
+    cat(sprintf("  %d. %s (p = %.2e)\n", i, top_genes$gene_symbol[i], top_genes$p_value[i]))
+  }
+}
+```
+
+
+## Scatter Plot 2: Age vs Expression for Most Significant Genes per Region
+```{r age-expression-scatter}
+# Create age vs expression scatter plots for top gene from each region
+age_plots <- list()
+
+for(i in 1:length(regions)) {
+  region_name <- regions[i]
+  region_data <- region_results[[region_name]]
+
+  # Get the most significant gene from this region
+  top_gene <- region_data[order(region_data$p_value), ][1, ]
+  gene_name <- top_gene$gene_symbol
+
+  # Find gene index in original expression data
+  gene_symbols <- genemeta["sym", is.gene]
+  gene_idx <- which(gene_symbols == gene_name)
+
+  # Check if gene was found
+  if(length(gene_idx) == 0) {
+    cat("Warning: Gene", gene_name, "not found in expression data\n")
+    next
+  }
+
+  # Take the first match if multiple matches found
+  if(length(gene_idx) > 1) {
+    gene_idx <- gene_idx[1]
+  }
+
+  # Create region-specific data
+  region_mask <- if(region_name == "ANCG") {
+    covariates$region == "1"
+  } else if(region_name == "CB") {
+    covariates$region == "2"
+  } else {
+    covariates$region == "3"
+  }
+
+  plot_data <- data.frame(
+    Age = covariates$age[region_mask],
+    Expression = expression.used[region_mask, gene_idx],
+    Age_Group = ifelse(covariates$age[region_mask] >= 65, "65+", "<65")
+  )
+
+  # Remove any rows with missing data
+  plot_data <- plot_data[complete.cases(plot_data), ]
+
+  # Check if we have enough data
+  if(nrow(plot_data) < 5) {
+    cat("Warning: Not enough data for gene", gene_name, "in region", region_name, "\n")
+    next
+  }
+
+  # Calculate correlation
+  cor_value <- cor(plot_data$Age, plot_data$Expression, use = "complete.obs")
+
+  # Calculate linear model for additional stats
+  lm_model <- lm(Expression ~ Age, data = plot_data)
+  r_squared <- summary(lm_model)$r.squared
+  p_val_cor <- cor.test(plot_data$Age, plot_data$Expression)$p.value
+
+  # Set region-specific colors
+  region_colors <- list(
+    "ANCG" = c("65+" = "#e67e22", "<65" = "#f39c12"),
+    "CB" = c("65+" = "#229954", "<65" = "#27ae60"),
+    "DLPFC" = c("65+" = "#8e44ad", "<65" = "#9b59b6")
+  )
+
+  p <- ggplot(plot_data, aes(x = Age, y = Expression)) +
+    geom_point(aes(color = Age_Group), size = 2.5, alpha = 0.7) +
+    geom_smooth(method = "lm", se = TRUE, color = "black", linetype = "solid", size = 1.2, alpha = 0.8) +
+    geom_vline(xintercept = 65, color = "red", linetype = "dashed", alpha = 0.7, size = 1) +
+    scale_color_manual(values = region_colors[[region_name]]) +
+    labs(title = paste0(region_name, ": ", gene_name),
+         subtitle = paste0("p = ", format(top_gene$p_value, scientific = TRUE, digits = 3),
+                          " | r = ", round(cor_value, 3),
+                          " | R² = ", round(r_squared, 3)),
+         x = "Age (years)",
+         y = "Expression Level",
+         color = "Age Group") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray50"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 11),
+      legend.text = element_text(size = 10),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(colour = "gray80", fill = NA, size = 0.5)
+    ) +
+    guides(color = guide_legend(override.aes = list(size = 3)))
+
+  # Add sample size annotation
+  n_samples <- nrow(plot_data)
+  n_65_plus <- sum(plot_data$Age_Group == "65+")
+  n_65_minus <- sum(plot_data$Age_Group == "<65")
+
+  p <- p + annotate("text",
+                   x = min(plot_data$Age) + 0.02 * (max(plot_data$Age) - min(plot_data$Age)),
+                   y = max(plot_data$Expression) - 0.05 * (max(plot_data$Expression) - min(plot_data$Expression)),
+                   label = paste0("n = ", n_samples, " (", n_65_minus, " < 65, ", n_65_plus, " ≥ 65)"),
+                   hjust = 0, vjust = 1, size = 3.5, color = "gray40")
+
+  age_plots[[i]] <- p
+}
+
+# Check if we have plots to arrange
+if(length(age_plots) > 0) {
+  # Arrange age plots in a single row
+  if(length(age_plots) == 3) {
+    combined_age <- grid.arrange(grobs = age_plots, ncol = 3)
+  } else {
+    combined_age <- do.call(grid.arrange, c(age_plots, ncol = length(age_plots)))
+  }
+
+  # Save the age comparison plot
+  ggsave("age_expression_top_genes_age65.pdf", combined_age, width = 18, height = 6, dpi = 300)
+  cat("Successfully created age vs expression plots for", length(age_plots), "regions\n")
+} else {
+  cat("No age plots were created\n")
+}
+
+# Print detailed summary
+cat("\n=== Age vs Expression Analysis Summary ===\n")
+for(i in 1:length(regions)) {
+  if(i <= length(age_plots)) {
+    region_name <- regions[i]
+    region_data <- region_results[[region_name]]
+    top_gene <- region_data[order(region_data$p_value), ][1, ]
+
+    # Recalculate stats for summary
+    region_mask <- if(region_name == "ANCG") {
+      covariates$region == "1"
+    } else if(region_name == "CB") {
+      covariates$region == "2"
+    } else {
+      covariates$region == "3"
+    }
+
+    gene_symbols <- genemeta["sym", is.gene]
+    gene_idx <- which(gene_symbols == top_gene$gene_symbol)[1]
+
+    if(length(gene_idx) > 0) {
+      plot_data <- data.frame(
+        Age = covariates$age[region_mask],
+        Expression = expression.used[region_mask, gene_idx]
+      )
+      plot_data <- plot_data[complete.cases(plot_data), ]
+
+      if(nrow(plot_data) >= 5) {
+        cor_value <- cor(plot_data$Age, plot_data$Expression)
+
+        cat(sprintf("\n%s:\n", region_name))
+        cat(sprintf("  Gene: %s\n", top_gene$gene_symbol))
+        cat(sprintf("  P-value: %.2e\n", top_gene$p_value))
+        cat(sprintf("  Effect size: %.4f\n", top_gene$effect_size))
+        cat(sprintf("  Age correlation: %.3f\n", cor_value))
+        cat(sprintf("  Sample size: %d\n", nrow(plot_data)))
+      }
+    }
+  }
+}
+```
+## Region-Specific Heatmaps
+```{r region-specific-heatmaps-display}
+# Function to create simple heatmap for each region
+create_region_heatmap <- function(region_name, top_n_genes = 20) {
+
+  # Get region-specific data
+  region_mask <- if(region_name == "ANCG") {
+    covariates$region == "1"
+  } else if(region_name == "CB") {
+    covariates$region == "2"
+  } else {
+    covariates$region == "3"
+  }
+
+  # Get top genes for this region
+  region_data <- region_results[[region_name]]
+
+  # Remove any duplicated genes and sort by p-value (lowest first)
+  region_data <- region_data[!duplicated(region_data$gene_symbol), ]
+  region_data <- region_data[order(region_data$p_value), ]
+
+  # Take top genes
+  top_genes_region <- head(region_data, top_n_genes)
+  top_gene_names <- top_genes_region$gene_symbol
+
+  cat("Selected genes for", region_name, ":", length(top_gene_names), "\n")
+
+  # Find gene indices
+  gene_symbols <- genemeta["sym", is.gene]
+  top_gene_indices <- sapply(top_gene_names, function(gene) {
+    idx <- which(gene_symbols == gene)
+    if(length(idx) > 0) idx[1] else NA
+  })
+
+  # Remove NAs and ensure no duplicates
+  valid_indices <- !is.na(top_gene_indices)
+  top_gene_indices <- top_gene_indices[valid_indices]
+  top_gene_names <- top_gene_names[valid_indices]
+
+  # Remove any duplicate indices
+  unique_indices <- !duplicated(top_gene_indices)
+  top_gene_indices <- top_gene_indices[unique_indices]
+  top_gene_names <- top_gene_names[unique_indices]
+
+  cat("Valid unique genes for", region_name, ":", length(top_gene_names), "\n")
+
+  # Extract region-specific expression data
+  region_expression <- expression.used[region_mask, top_gene_indices]
+  region_covariates <- covariates[region_mask, ]
+
+  # Create sample info for this region
+  sample_info <- data.frame(
+    Age = region_covariates$age,
+    Age_Group = ifelse(region_covariates$age >= 65, "65+", "<65")
+  )
+
+  # Sort by age
+  age_order <- order(sample_info$Age)
+  region_expression_sorted <- region_expression[age_order, ]
+  sample_info_sorted <- sample_info[age_order, ]
+
+  # Add gene names as column names
+  colnames(region_expression_sorted) <- top_gene_names
+
+  # Standardize gene expression (z-score), handling NAs
+  expression_scaled <- scale(region_expression_sorted)
+
+  # Create heatmap (display directly, no PDF)
+  # Transpose for heatmap (genes as rows)
+  # Reverse the order: least significant gene at top
+  heatmap_t <- t(expression_scaled)
+  heatmap_t <- heatmap_t[nrow(heatmap_t):1, ]  # Reverse row order
+
+  # Create age group colors for column annotation
+  age_group_colors <- ifelse(sample_info_sorted$Age_Group == "65+", "#e74c3c", "#3498db")
+
+  # Create color palette with NA handling
+  color_palette <- colorRampPalette(c("#0066cc", "#ffffff", "#cc0000"))(100)
+
+  heatmap(heatmap_t,
+          Colv = NA,  # No column clustering (keep age order)
+          Rowv = NA,  # No row clustering (reversed order)
+          scale = "none",  # Already scaled
+          col = color_palette,
+          na.color = "#808080",  # Gray color for NA values
+          margins = c(4, 12),  # Increase left margin for gene names
+          cexRow = 0.7,  # Gene name size
+          cexCol = 0.1,  # Sample label size (hidden)
+          main = paste0(region_name, " - Top ", length(top_gene_names), " Genes"),
+          xlab = "",  # Remove x-axis label
+          ylab = "Genes (by significance)",
+          ColSideColors = age_group_colors,
+          labCol = rep("", ncol(heatmap_t)))  # Remove column labels completely
+
+  # Add legend
+  legend("topright",
+         legend = c("Age < 65", "Age ≥ 65", "Low expr.", "High expr.", "NA"),
+         fill = c("#3498db", "#e74c3c", "#0066cc", "#cc0000", "#808080"),
+         title = "Legend",
+         cex = 0.7)
+
+  # Return summary info
+  return(list(
+    region = region_name,
+    n_samples = nrow(region_expression_sorted),
+    n_genes = ncol(region_expression_sorted),
+    n_young = sum(sample_info_sorted$Age < 65),
+    n_old = sum(sample_info_sorted$Age >= 65),
+    age_range = range(sample_info_sorted$Age),
+    top_genes = top_gene_names[1:min(5, length(top_gene_names))],
+    top_pvalues = top_genes_region$p_value[1:min(5, length(top_gene_names))]
+  ))
+}
+
+# Create heatmaps for all three regions
+cat("Creating region-specific heatmaps (displayed directly)...\n")
+
+region_summaries <- list()
+for(region_name in regions) {
+  cat("\nProcessing", region_name, "...\n")
+  region_summaries[[region_name]] <- create_region_heatmap(region_name, top_n_genes = 20)
+}
+```
