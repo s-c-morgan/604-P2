@@ -37,13 +37,41 @@ dlpfc_expression <- expression[dlpfc_mask, ]
 
 We identified several promising genes for future study into aging in the human brain. According to our analysis, we would suggest further examiniation of 20 genes from across three sites in the human brain. From the ACG region... These genes have demonstrated statistically signficant expression between patients less than 65 and those 65 and older at the $alpha =...$ level.
 
-These results were obtained through versions of a linear model adapted to each brain region studied in our sample, as we observed stark differences between the expression of genes based on their location in the brain. The specification, justification, and interpretation of these models are available in the following sections.
+These results were obtained through versions of a linear model adapted to each brain region studied in our sample, as we observed stark differences between the expression of genes based on their location in the brain. The justification for and specification and interpretation of these models will follow in the following sections.
 
 ## Exploratory Data Analysis
 
+The distribution of the available data makes pairwise analysis difficult. If we wished to compare gene expressions for older and younger people for the same brain region and lab site using this method, we would run into complications quickly. Referring to the table below, one can see glaring sparsity at the region-lab level. For example, genes from the ANCG region are completely absent from analysis conducted at Davis lab. 
 
+\begin{table}[h!]
+\centering
+\begin{tabular}{llrrrrr}
+\textbf{Region} & \textbf{Age} & \textbf{Davis} & \textbf{Irvine} & \textbf{Michigan} & \textbf{Total} \\
+CB     & $<70$  & 15 & 38 & 17 & 70 \\
+CB     & $70+$  & 6  & 4  & 1  & 11 \\
+ANCG   & $<70$  & 0  & 56 & 48 & 104 \\
+ANCG   & $70+$  & 0  & 10 & 13 & 23 \\
+DLPFC  & $<70$  & 69 & 9  & 68 & 146 \\
+DLPFC  & $70+$  & 16 & 0  & 16 & 32 \\
+\end{tabular}
+\caption{Meta array observations by region, age group, and location}
+\end{table}
+ 
+ A possible solution would be to ignore possible confounding coming from the lab or brain region variables. On further analysis, this would be a large mistake. In this dataset, the same gene is observed to have wildly different expression levels depending on the region of the brain the observation comes from. This corroborates the idea that different parts of the brain have different functions, as these disparate functions would likely draw on differently expressed combinations of genes. 
+ 
+A related problem is the correlation structure between observations coming from the same individual. Since multiple observations from the same individual are analyzed in either separate arrays or different labs, it is important to understand the balance between the number of observations and the number of individuals these observations come from. By the below figure, we can see that there is a tangible imbalance in both the number of observations and individuals among the two groups. Missing and corrupted data analysis was also conducted by examining the control genes, but no systematic issues were found. 
+
+Our proposed solution for adjusting for these data distribution imbalances is the use of separate linear regression models for each brain region. These will lack some of the inferential power that could be acheived by ignoring brain region as a significant confounder, but it is more justifiable from a modelling perspective and causal inference perspective.
+
+\begin{figure}[htbp!]
+\centering
+\includegraphics[width=0.4\textwidth]{age_hist.pdf}
+\caption{Breakdown of observations and samples by age, old/young cutoff (age 70) highlighted in red}
+\label{fig:age_hist}
+\end{figure}
 
 # Methodology
+
 ## Simple Linear Regression
 Based on the three brain regions (ANCG, CB, and DLPFC), we fit separate models for each region dataset:
 $$\text{gene expression} = \beta_0 + \beta_1 \text{age indicator} + \beta_2 \text{lab} + \beta_3 \text{sex} + \beta_4 \text{array version} + \varepsilon.$$
