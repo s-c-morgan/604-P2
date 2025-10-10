@@ -1,0 +1,676 @@
+---
+title: "Brain Expression Analysis - Project 2"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-packages}
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(fixest)
+```
+
+# Preliminary Data Analysis
+
+## Load Data
+
+```{r load-data,  echo=FALSE}
+
+load("brain.rda")
+
+cat("Available objects in workspace:\n")
+ls()
+
+cat("\nExpression data shape:", dim(expression), "\n")
+cat("Array metadata shape:", dim(arraymeta), "\n")
+cat("Gene metadata shape:", dim(genemeta), "\n")
+```
+
+## Explore Data Structure
+
+```{r explore-expression,  echo=FALSE}
+cat("Expression data shape:", dim(expression), "\n")
+head(expression[1:8, 1:10])
+```
+
+```{r explore-arraymeta,  echo=FALSE}
+cat("Array metadata shape:", dim(arraymeta), "\n")
+arraymeta[arraymeta$patient == '1834', ]
+```
+
+## Age Distribution Analysis
+
+```{r age-analysis}
+age_array <- arraymeta$age
+unique_patients <- arraymeta[!duplicated(arraymeta$patient), ]
+unique_age_array <- unique_patients$age
+
+# Create age histogram
+ggplot() +
+  geom_histogram(aes(x = age_array, fill = "samples"),
+                 alpha = 0.7, color = "black", bins = 20) +
+  geom_histogram(aes(x = unique_age_array, fill = "individual"),
+                 alpha = 0.7, color = "black", bins = 20) +
+  geom_vline(xintercept = 70, color = "red", linewidth = 1) +
+  labs(x = "Age", y = "Count", fill = "Type") +
+  scale_fill_manual(values = c("samples" = "lightblue", "individual" = "darkblue")) +
+  theme_minimal() +
+  annotate("text", x = 72, y = max(table(age_array)) * 0.8,
+           label = "age = 70", color = "red")
+
+ggsave("age_hist.pdf", width = 8, height = 6, dpi = 300)
+```
+
+```{r patients-under-70,  echo=FALSE}
+unique_patients[unique_patients$age < 70, ]
+```
+
+## Sex Distribution
+
+```{r sex-distribution,  echo=FALSE}
+sex_counts <- table(arraymeta$sex)
+barplot(sex_counts, main = "Sex Distribution", ylab = "Count",
+        col = c("lightcoral", "lightblue"))
+```
+
+## Gene Metadata
+
+```{r gene-metadata,  echo=FALSE}
+head(genemeta[, 1:10])
+```
+
+## Preprocessing
+
+Split data by brain regions and age groups:
+
+```{r preprocessing, echo=FALSE}
+head(arraymeta)
+```
+
+### Split by Regions
+
+```{r split-regions}
+# Cerebellum (cb) - use logical indexing directly
+cb_mask <- arraymeta$region.cb == 1
+cb_arraymeta <- arraymeta[cb_mask, ]
+cb_expression <- expression[cb_mask, ]
+
+# Anterior cingulate (ancg)
+ancg_mask <- arraymeta$region.ancg == 1
+ancg_arraymeta <- arraymeta[ancg_mask, ]
+ancg_expression <- expression[ancg_mask, ]
+
+# Dorsolateral prefrontal cortex (dlpfc)
+dlpfc_mask <- arraymeta$region.dlpfc == 1
+dlpfc_arraymeta <- arraymeta[dlpfc_mask, ]
+dlpfc_expression <- expression[dlpfc_mask, ]
+
+cat("cb:", nrow(cb_arraymeta), "rows\n")
+cat("ancg:", nrow(ancg_arraymeta), "rows\n")
+cat("dlpfc:", nrow(dlpfc_arraymeta), "rows\n")
+```
+
+### Create Age-Region Splits
+
+```{r age-region-splits}
+regions <- list(
+  'cb' = 'region.cb',
+  'ancg' = 'region.ancg',
+  'dlpfc' = 'region.dlpfc'
+)
+
+splits <- list()
+
+for (short in names(regions)) {
+  col <- regions[[short]]
+  in_region <- arraymeta[[col]] == 1
+  is_70plus <- arraymeta$age >= 70
+
+  # Create logical masks for the combinations
+  mask_70plus <- in_region & is_70plus
+  mask_u70 <- in_region & !is_70plus
+
+  # Use logical indexing to subset both dataframes
+  splits[[paste(short, '70+', sep='_')]] <- cbind(
+    arraymeta[mask_70plus, ],
+    expression[mask_70plus, ]
+  )
+  splits[[paste(short, '70-', sep='_')]] <- cbind(
+    arraymeta[mask_u70, ],
+    expression[mask_u70, ]
+  )
+
+  cat(sprintf("%-6s 70+: %4d rows | 70-: %4d rows\n",
+              short, sum(mask_70plus), sum(mask_u70)))
+}
+```
+
+### Examine ANCG 70+ Group
+
+```{r ancg-70plus}
+head(splits[['ancg_70+']])
+```
+
+### Lab Distribution by Region and Age
+
+```{r lab-distribution-cb}
+cat("CB 70- lab distribution:\n")
+cat("Davis:", sum(splits[['cb_70-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['cb_70-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['cb_70-']]$lab.michigan), "\n")
+
+cat("\nCB 70+ lab distribution:\n")
+cat("Davis:", sum(splits[['cb_70+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['cb_70+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['cb_70+']]$lab.michigan), "\n")
+```
+
+```{r lab-distribution-ancg}
+cat("ANCG 70- lab distribution:\n")
+cat("Davis:", sum(splits[['ancg_70-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['ancg_70-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['ancg_70-']]$lab.michigan), "\n")
+
+cat("\nANCG 70+ lab distribution:\n")
+cat("Davis:", sum(splits[['ancg_70+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['ancg_70+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['ancg_70+']]$lab.michigan), "\n")
+```
+
+```{r lab-distribution-dlpfc}
+cat("DLPFC 70- lab distribution:\n")
+cat("Davis:", sum(splits[['dlpfc_70-']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['dlpfc_70-']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['dlpfc_70-']]$lab.michigan), "\n")
+
+cat("\nDLPFC 70+ lab distribution:\n")
+cat("Davis:", sum(splits[['dlpfc_70+']]$lab.davis), "\n")
+cat("Irvine:", sum(splits[['dlpfc_70+']]$lab.irvine), "\n")
+cat("Michigan:", sum(splits[['dlpfc_70+']]$lab.michigan), "\n")
+```
+
+# Model Fitting and Results
+
+## Linear Regression with Fixed Effects
+```{r}
+# Convert region indicator variables to categorical labels
+region <- arraymeta %>%
+    dplyr::select(region.ancg, region.cb, region.dlpfc) %>%
+    max.col %>%  # Returns column index for each row
+    as.character  # Convert to character labels
+
+# Convert lab indicator variables to categorical labels
+lab <- arraymeta %>%
+    dplyr::select(lab.davis, lab.irvine, lab.michigan) %>%
+    max.col %>%  # Returns column index for each row
+    as.character  # Convert to character labels
+
+# Create final covariate dataset
+covariates <- arraymeta %>%
+    dplyr::select(patient, age, sex, arrayversion) %>%  # Select base covariates
+    dplyr::mutate(lab = lab, region = region) %>%  # Add categorical lab and region
+    dplyr::mutate(age.indicator = ifelse(age > 70, 1, 0))  # Binary age indicator
+
+# Filter genes with chromosome information
+is.gene <- !is.na(genemeta["chrom",])
+# Subset expression data to valid genes
+expression.used <- expression[ ,is.gene]
+# Rename gene columns for modeling
+colnames(expression.used) <- paste0("gene", 1:sum(is.gene))
+# Get dependent variable names
+dep.used <- unname(colnames(expression.used))
+# Combine data for modeling
+df <- cbind(covariates, expression.used)
+
+# Fit fixed effects regression for all genes
+mod <- fixest::feols(.[dep.used] ~ age.indicator |  sex + arrayversion + lab + region, df)
+```
+
+## Results
+```{r}
+# Generate compact summary with robust standard errors
+result.summary <- summary(mod, "compact", se = "hetero")
+# Add gene symbols to results
+result.summary$lhs <- genemeta["sym", is.gene]
+```
+
+### Order by Age Indicator Significance
+```{r}
+# Extract coefficients and standard errors from model object directly
+coefs <- coef(mod)[,"age.indicator"]
+se <- se(mod, se = "hetero")[,"age.indicator"]
+# Calculate t-statistics (significance measure)
+t_stats <- abs(coefs / se)
+# Create ordered results dataframe
+ordered_results <- data.frame(
+  gene_symbol = genemeta["sym", is.gene],
+  coefficient = coefs,
+  std_error = se,
+  t_statistic = t_stats,
+  stringsAsFactors = FALSE
+)
+# Order by t-statistic (highest significance first)
+ordered_results <- ordered_results[order(t_stats, decreasing = TRUE), ]
+# Display top 20 most significant genes
+head(ordered_results, 20)
+```
+
+### Distribution of Age Indicator Effects
+```{r}
+# Histogram of coefficients
+ggplot(data.frame(coef = coefs), aes(x = coef)) +
+  geom_histogram(bins = 50, fill = "lightblue", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Age Indicator Coefficients",
+       x = "Coefficient", y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+# Histogram of t-statistics of age coefficients in each gene's regression
+ggplot(data.frame(t_stat = t_stats), aes(x = t_stat)) +
+  geom_histogram(bins = 50, fill = "lightcoral", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 1.96, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Age Indicator T-statistics",
+       x = "Absolute T-statistic", y = "Count") +
+  theme_minimal()
+```
+
+
+### Multiple testing
+
+In summary, the empirical‐Bayes multiple testing results reveal that age‐related transcriptional effects vary substantially across brain regions. The anterior cingulate cortex (ANCG) exhibits the strongest association between gene expression and age, with around 60 significant discoveries at a 5% FDR threshold under both the limma and NPMLE frameworks. This indicates robust and consistent age‐dependent expression patterns in this region. In contrast, the cerebellum (CB) shows no significant findings, suggesting either biological stability or limited statistical power, while the dorsolateral prefrontal cortex (DLPFC) displays only a few significant genes, implying a weaker or more localized effect. Comparing the two correction methods, the limma moderated t‐test (which assumes a parametric inverse‐Gamma prior on variances) and the NPMLE partially‐Bayes approach (which nonparametrically estimates the prior via Kiefer–Wolfowitz EM) yield nearly identical results, highlighting that the simple parametric assumption is sufficient here. The slight increase in discoveries under NPMLE in ANCG suggests mild across‐gene heteroscedasticity but not enough to change the overall conclusions. Together, these results indicate that aging‐related transcriptional regulation is region‐specific, statistically stable across EB methods, and most pronounced in the ANCG, where age variation and sample size likely confer higher detection power.
+
+
+
+```{r, echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(limma)
+
+load("brain.rda")
+
+cat("Objects:\n"); print(ls())
+cat("\nExpression dim   : "); print(dim(expression))
+cat("Arraymeta  dim   : "); print(dim(arraymeta))
+cat("Genemeta   dim   : "); print(dim(genemeta))
+
+head(arraymeta)
+head(expression[, 1:6])
+
+```
+```{r, echo=FALSE}
+# Map short region tags to one-hot columns in arraymeta
+region_map <- c(ancg = "region.ancg", cb = "region.cb", dlpfc = "region.dlpfc")
+
+# --- drop-in replacement ---
+lab_cols <- c("lab.davis","lab.irvine","lab.michigan")
+
+build_design_region <- function(am_sub) {
+  # pick only lab columns that are present (have at least one 1)
+  labs_mat <- am_sub[, lab_cols, drop = FALSE]
+  labs_present <- lab_cols[colSums(labs_mat, na.rm = TRUE) > 0]
+
+  if (length(labs_present) == 0) stop("No lab.* columns present in this subset.")
+
+  # restrict to present labs and compute per-row lab index
+  L <- as.matrix(am_sub[, labs_present, drop = FALSE])
+  lab_ix <- max.col(L, ties.method = "first")
+  # if any row has all zeros, mark as NA (rare; keeps things honest)
+  lab_ix[rowSums(L, na.rm = TRUE) == 0] <- NA_integer_
+
+  lab_labels <- sub("^lab\\.", "", labs_present)          # e.g. "davis","irvine"
+  lab_fac    <- factor(lab_ix,
+                       levels = seq_along(labs_present),
+                       labels = lab_labels)
+
+  sex_fac <- factor(am_sub$sex)
+  age_z   <- as.numeric(scale(am_sub$age))
+
+  X <- model.matrix(~ age_z + lab_fac + sex_fac)
+  list(X = X, age_col = "age_z")
+}
+
+
+run_limma_region <- function(expr_sub, am_sub) {
+  des <- build_design_region(am_sub); X <- des$X; age_col <- des$age_col
+  E   <- t(as.matrix(expr_sub))                 # genes x samples for limma
+  fit <- lmFit(E, X)
+  fit <- eBayes(fit)
+  j   <- which(colnames(X) == age_col)
+  stopifnot(length(j) == 1)
+  tibble(
+    gene      = rownames(fit$coefficients),
+    beta_age  = fit$coefficients[, j],
+    t_mod     = fit$t[, j],
+    p_limma   = fit$p.value[, j],
+    q_limma   = p.adjust(fit$p.value[, j], method = "BH")
+  )
+}
+
+
+# Scaled-chi^2 log-density: p(s2 | sigma2, nu)
+log_pdf_scaled_chi2 <- function(s2, sigma2, nu) {
+  s2 <- pmax(as.numeric(s2), 1e-300)
+  log_s2 <- log(s2)
+  K <- length(sigma2); G <- length(s2)
+  c0 <- (nu/2)*log(nu/2) - lgamma(nu/2)
+  out <- matrix(0, nrow = G, ncol = K)
+  for (k in seq_len(K)) {
+    out[, k] <- c0 + (nu/2 - 1)*log_s2 - (nu/2)*log(sigma2[k]) - (nu*s2)/(2*sigma2[k])
+  }
+  out
+}
+
+# Kiefer–Wolfowitz NPMLE on sigma^2 via EM over a log-grid
+npml_sigma2_prior <- function(S2, nu, n_grid = 300L, q01 = 0.01, max_iter = 200L, tol = 1e-8) {
+  S2 <- pmax(as.numeric(S2), 1e-10)
+  a  <- max(quantile(S2, q01, names = FALSE), 1e-12)
+  b  <- max(S2)
+  if (b <= a) b <- a * 1.5
+  grid <- exp(seq(log(a), log(b), length.out = n_grid))
+  w    <- rep(1/n_grid, n_grid)
+  prev_ll <- -Inf
+  for (it in seq_len(max_iter)) {
+    log_p   <- log_pdf_scaled_chi2(S2, grid, nu)           # G x K
+    log_num <- sweep(log_p, 2, log(w), `+`)
+    row_max <- apply(log_num, 1, max)
+    R       <- exp(log_num - row_max)                      # unnormalized responsibilities
+    denom   <- rowSums(R)
+    R       <- R / denom
+    w_new   <- colMeans(R); w_new <- pmax(w_new, 1e-16); w_new <- w_new / sum(w_new)
+    ll <- sum(row_max + log(denom))
+    if (is.finite(prev_ll) && (ll - prev_ll) < tol * (abs(prev_ll) + 1)) { w <- w_new; break }
+    w <- w_new; prev_ll <- ll
+  }
+  # final normalized responsibilities
+  log_p   <- log_pdf_scaled_chi2(S2, grid, nu)
+  log_num <- sweep(log_p, 2, log(w), `+`)
+  row_max <- apply(log_num, 1, max)
+  R       <- exp(log_num - row_max)
+  R       <- R / rowSums(R)
+  list(grid_sigma2 = grid, weights = w, resp = R)
+}
+
+run_npml_region <- function(expr_sub, am_sub) {
+  des <- build_design_region(am_sub); X <- des$X; age_col <- des$age_col
+  Y   <- as.matrix(expr_sub)                        # n x G
+  n   <- nrow(Y); p <- ncol(X); nu <- n - p
+  if (nu <= 0) stop("Design not full rank for this subset.")
+  XtX     <- crossprod(X)
+  XtX_inv <- solve(XtX)
+  B       <- XtX_inv %*% crossprod(X, Y)           # p x G
+  res     <- Y - X %*% B
+  SSE     <- colSums(res^2)
+  S2      <- SSE / nu                               # G-vector
+  j       <- which(colnames(X) == age_col)
+  stopifnot(length(j) == 1)
+  vjj     <- XtX_inv[j, j]
+  Z       <- as.numeric(B[j, ] / sqrt(vjj))        # Var(Z | sigma^2) = sigma^2
+
+  # NPMLE on sigma^2, then mixture-of-z p-values
+  npml    <- npml_sigma2_prior(S2, nu = nu, n_grid = 300L, q01 = 0.01)
+  sigma   <- sqrt(npml$grid_sigma2)
+  mix_p_mat <- outer(abs(Z), sigma, function(z, s) 2*pnorm(-z / s))
+  p_npml    <- rowSums(npml$resp * mix_p_mat)
+
+  tibble(
+    gene      = colnames(expr_sub),
+    beta_age  = as.numeric(B[j, ]),
+    z_age     = Z,
+    s2_resid  = S2,
+    p_npml    = p_npml,
+    q_npml    = p.adjust(p_npml, method = "BH")
+  )
+}
+
+
+run_end_to_end <- function(expression, arraymeta, alpha = 0.05) {
+  out_limma <- list(); out_npml <- list(); summary <- list()
+  for (rk in names(region_map)) {
+    col  <- region_map[[rk]]
+    mask <- arraymeta[[col]] == 1
+    am   <- arraymeta[mask, , drop = FALSE]
+    ex   <- expression[mask, , drop = FALSE]
+
+    limma_res <- run_limma_region(ex, am) %>% mutate(region = rk)
+    npml_res  <- run_npml_region(ex, am)  %>% mutate(region = rk)
+
+    out_limma[[rk]] <- limma_res
+    out_npml[[rk]]  <- npml_res
+
+    summary[[rk]] <- tibble(
+      region = rk,
+      m_genes = ncol(ex),
+      disc_limma = sum(limma_res$q_limma <= alpha, na.rm = TRUE),
+      disc_npml  = sum(npml_res$q_npml  <= alpha, na.rm = TRUE)
+    )
+  }
+  list(
+    limma  = out_limma,
+    npml   = out_npml,
+    digest = bind_rows(summary)
+  )
+}
+
+```
+
+
+```{r}
+alpha <- 0.05
+e2e <- run_end_to_end(expression, arraymeta, alpha = alpha)
+
+# Per-region discovery counts
+e2e$digest
+
+
+```
+
+
+```{r}
+print_discoveries <- function(res_list, q_col, p_col, alpha = 0.05, top = 20, save_prefix = NULL) {
+  for (rk in names(res_list)) {
+    df <- res_list[[rk]]
+    disc <- df %>% filter(.data[[q_col]] <= alpha) %>% arrange(.data[[q_col]], .data[[p_col]])
+    cat("\n[", rk, "] ", nrow(disc), " discoveries at FDR ≤ ", alpha, " (m = ", nrow(df), ")\n", sep = "")
+    if (nrow(disc) > 0) {
+      show_cols <- intersect(c("gene","beta_age","t_mod","z_age", p_col, q_col), names(disc))
+      print(head(disc[, show_cols, drop = FALSE], top), row.names = FALSE)
+      if (!is.null(save_prefix)) {
+        fn <- paste0(save_prefix, "_", rk, ".csv")
+        readr::write_csv(disc, fn)
+        cat("  ↳ saved: ", fn, "\n", sep = "")
+      }
+    }
+  }
+}
+
+# limma EB
+print_discoveries(e2e$limma, q_col = "q_limma", p_col = "p_limma", alpha = alpha, top = 20, save_prefix = NULL)
+
+# NPMLE EB
+print_discoveries(e2e$npml,  q_col = "q_npml",  p_col = "p_npml",  alpha = alpha, top = 20, save_prefix = NULL)
+
+```
+
+
+
+```{r, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+library(grid)  # for unit()
+
+plot_pq_by_region_pretty <- function(
+  res_list, p_col, q_col, method_name,
+  bins = 40, save_prefix = NULL,
+  hist_fill = "#CFE5FF",     # histogram fill
+  hist_border = "#2C3E50",   # histogram border
+  density_col = "#1F78B4",   # density curve
+  vline_col = "#444444"      # x=0.05 line
+) {
+  longdf <- dplyr::bind_rows(lapply(names(res_list), function(rk) {
+    df <- res_list[[rk]]
+    tibble::tibble(region = rk, p = df[[p_col]], q = df[[q_col]])
+  }))
+
+  facet_labs <- c(ancg = "ANCG", cb = "CB", dlpfc = "DLPFC")
+  longdf$region <- factor(longdf$region, levels = c("ancg","cb","dlpfc"),
+                          labels = facet_labs[c("ancg","cb","dlpfc")])
+
+  base_theme <- theme_minimal(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0, margin = margin(b = 6)),
+      strip.text = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_blank(),
+      axis.title.x = element_text(margin = margin(t = 6)),
+      axis.title.y = element_text(margin = margin(r = 6)),
+      plot.caption = element_text(color = "grey40", margin = margin(t = 4))
+    )
+
+  # reusable small data frame for label at x=0.05
+  label_df <- data.frame(x = 0.05, y = Inf, label = "0.05")
+
+  # p-values
+  gp <- ggplot(longdf, aes(x = p)) +
+    geom_histogram(aes(y = after_stat(density)),
+                   bins = bins, linewidth = 0.3,
+                   color = hist_border, fill = hist_fill) +
+    geom_density(color = density_col, linewidth = 1.0, alpha = 0.95, na.rm = TRUE) +
+    geom_vline(xintercept = 0.05, linetype = "dashed", linewidth = 0.7, color = vline_col) +
+    geom_label(
+      data = label_df,
+      aes(x = x, y = y, label = label),
+      vjust = 1.2, size = 3, label.padding = unit(0.12, "lines"), alpha = 0.85
+    ) +
+    facet_wrap(~ region, ncol = 3) +
+    scale_x_continuous(limits = c(0,1), breaks = c(0, .05, .1, .2, .5, 1)) +
+    labs(
+      title = paste(method_name, "— p-values"),
+      x = "p", y = "density",
+      caption = "Histogram with density overlay; dashed line marks 0.05."
+    ) +
+    base_theme
+
+  # q-values
+  gq <- ggplot(longdf, aes(x = q)) +
+    geom_histogram(aes(y = after_stat(density)),
+                   bins = bins, linewidth = 0.3,
+                   color = hist_border, fill = hist_fill) +
+    geom_density(color = density_col, linewidth = 1.0, alpha = 0.95, na.rm = TRUE) +
+    geom_vline(xintercept = 0.05, linetype = "dashed", linewidth = 0.7, color = vline_col) +
+    geom_label(
+      data = label_df,
+      aes(x = x, y = y, label = label),
+      vjust = 1.2, size = 3, label.padding = unit(0.12, "lines"), alpha = 0.85
+    ) +
+    facet_wrap(~ region, ncol = 3) +
+    scale_x_continuous(limits = c(0,1), breaks = c(0, .05, .1, .2, .5, 1)) +
+    labs(
+      title = paste(method_name, "— BH q-values"),
+      x = "q", y = "density",
+      caption = "Histogram with density overlay; dashed line marks 0.05."
+    ) +
+    base_theme
+
+  if (!is.null(save_prefix)) {
+    ggsave(paste0(save_prefix, "_p.pdf"), gp, width = 9, height = 3.5, dpi = 300)
+    ggsave(paste0(save_prefix, "_q.pdf"), gq, width = 9, height = 3.5, dpi = 300)
+  }
+
+  list(p_hist = gp, q_hist = gq)
+}
+
+```
+
+```{r, echo=FALSE}
+
+plots_limma <- plot_pq_by_region_pretty(
+  e2e$limma, p_col = "p_limma", q_col = "q_limma", method_name = "limma EB",
+  hist_fill = "#E8F5E9", hist_border = "#1B5E20",
+  density_col = "#2E7D32", vline_col = "#616161"
+)
+
+plots_npml <- plot_pq_by_region_pretty(
+  e2e$npml, p_col = "p_npml", q_col = "q_npml", method_name = "NPMLE EB",
+  hist_fill = "#FFF3E0", hist_border = "#E65100",
+  density_col = "#FB8C00", vline_col = "#616161"
+)
+
+plots_limma$p_hist
+plots_limma$q_hist
+plots_npml$p_hist
+plots_npml$q_hist
+
+```
+
+
+
+
+### Appendix
+In the appendix, we elaborate the empirical bayes moderate techniques used. Here we use $\widehat{\beta}$ as a proxy of gaussian measurments with a bit loss of rigor.
+We adopt a unified \emph{empirical partially Bayes} framework for large-scale testing problems where, for each unit $i=1,\dots,n$, one observes a summary pair $(Z_i,S_i^2)$ with
+$$
+Z_i\mid(\mu_i,\sigma_i^2)\sim N(\mu_i,\sigma_i^2),\qquad
+S_i^2\mid\sigma_i^2\sim (\sigma_i^2/\nu)\chi^2_\nu.
+$$
+The goal is to test $H_i:\mu_i=0$ while accounting for uncertainty in the nuisance variances.
+The oracle partially Bayes analyst posits a prior $G$ for $\sigma_i^2$ and defines the conditional two-sided $p$-value
+$$
+P_G(Z_i,S_i^2)
+= \mathbb{E}_G\!\left[\,2\{1-\Phi(|Z_i|/\sigma)\}\mid S_i^2\right],
+$$
+which is uniform under $H_i$ both conditionally and unconditionally on $S_i^2$.
+The \texttt{limma} method corresponds to the parametric choice
+$$
+\frac{1}{\sigma_i^2}\sim \frac{1}{\nu_0 s_0^2}\chi^2_{\nu_0},
+$$
+leading to the \emph{moderated variance}
+$$
+\tilde s_i^2=\frac{\nu_0 s_0^2+\nu S_i^2}{\nu_0+\nu},\qquad
+\tilde t_i=\frac{Z_i}{\tilde s_i},
+$$
+and the moderated-$t$ $p$-value
+$$
+P_{\mathrm{limma},\,\nu_0,s_0^2}(Z_i,S_i^2)
+=2\,\bar F_{t,\nu_0+\nu}(|\tilde t_i|),
+$$
+where $\bar F_{t,\kappa}$ denotes the survival function of a $t$ distribution with $\kappa$ degrees of freedom.
+This is exactly equal to $P_G(Z_i,S_i^2)$ for the inverse--scaled--$\chi^2$ prior, thus showing that
+\texttt{limma} is a parametric special case of conditional partially Bayes inference.
+
+
+The paper generalizes this approach by replacing the parametric prior $G$ with the
+nonparametric maximum-likelihood estimate (NPMLE)
+$$
+\widehat G \in \arg\max_G\sum_{i=1}^n\log f_G(S_i^2),\qquad
+f_G(s^2)=\int_0^\infty p(s^2\mid\sigma^2,\nu)\,dG(\sigma^2),
+$$
+where $p(s^2\mid\sigma^2,\nu)$ is the scaled-$\chi^2$ density.
+The resulting plug-in $p$-values $P_{\widehat G}(Z_i,S_i^2)$ inherit the oracle’s conditional uniformity asymptotically
+and can be computed efficiently since $\widehat G$ is discrete with at most $n$ support points.
+
+The complete multiple-testing pipeline (\emph{Algorithm~1}) is as follows:
+\begin{enumerate}
+  \item Estimate $G$ from the sample variances $\{S_i^2\}$---parametrically (as in \texttt{limma}) or nonparametrically via NPMLE.
+  \item Compute the conditional $p$-values $P_i=P_{\widehat G}(Z_i,S_i^2)$.
+  \item Apply the Benjamini--Hochberg procedure at level $\alpha$:
+  reject all $H_i$ such that $P_i\le P_{(k^\star)}$, where
+  $$
+  k^\star=\max\Bigl\{\ell:P_{(\ell)}\le\alpha\ell/n\Bigr\}.
+  $$
+\end{enumerate}
+
+Under the hierarchical model where $\sigma_i^2\stackrel{\mathrm{iid}}{\sim}G$, these plug-in $p$-values are asymptotically uniform,
+so BH controls the false discovery rate at approximately $\alpha n_0/n$ with nearly parametric error rate
+$\mathcal{N}((\log n)^{5/2}/\sqrt{n})$.
+Even in the compound setting with fixed variances, the same algorithm achieves
+\emph{average significance} and asymptotic FDR control.
+Thus, \texttt{limma} emerges as the parametric member of a broader empirical partially Bayes family,
+while the NPMLE variant provides model-robust and theoretically justified $p$-values for large-scale inference.
