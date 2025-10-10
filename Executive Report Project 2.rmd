@@ -172,3 +172,14 @@ Together, these results indicate that aging‐related transcriptional regulation
 
 
 # Conclusion
+
+We found no statistically significant genes in the CB region.
+In the DLPFC region, we found GJA1 and GFAP to pass the threshold.
+According to the literature, GJA1 encodes a gap junction protein essential for direct cell-to-cell communication and rapid electrical signaling, particularly crucial for the synchronized contraction of the heart and GFAP encodes the main intermediate filament protein of central nervous system astrocytes, providing structural support to the brain and serving as a key marker for cellular response to injury (gliosis).
+Although GFAP has a known function in the brain, it is unclear why GJA1 appeared in our analysis.
+Nevertheless, the gene also appeared significant in the ANCG region.
+In the ANCG region, we found GJA1, PLSCR4, AQP4, EFEMP1, ID4, NTRK2, AHCYL1, ERBB2IP, GFAP, AGXT2L1, RHOBTB3, AQP1, PPAP2B, and EDNRB to be significant.
+The two genes, GJA1 and GFAP that appeared in the DLPFC region were also found in this region.
+For other 12 genes, AQP4 and AQP1 are both genes that carry water molecules and are known to have roles in the astrocyte.
+NTRK2 encodes a receptor for brain-derived neurotrophic factor (BDNF) that, upon activation, plays a critical role in neuron survival, differentiation, and synaptic plasticity.
+We did not find immediate relationship of other genes to the central nervous system.
