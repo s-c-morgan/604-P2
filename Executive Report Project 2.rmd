@@ -70,9 +70,6 @@ ANCG & CB & DLPFC \\
 \end{tabular}
 \end{table}
 
-\textbf{Volcano Plots.} We visualized this result with volcano plots of region-wise effect sizes, which plots the (coefficient, -log(p-value)). 
-
-
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.8\textwidth]{top_4_genes_by_region_4x3.pdf}
@@ -158,3 +155,66 @@ For other 12 genes, AQP4 and AQP1 are both genes that carry water molecules and 
 NTRK2 encodes a receptor for brain-derived neurotrophic factor (BDNF) that, upon activation, plays a critical role in neuron survival, differentiation, and synaptic plasticity.
 
 We did not find immediate relationship of other genes to the central nervous system.
+
+\newpage
+## Appendix
+In the appendix, we elaborate the empirical bayes moderate techniques used. Here we use $\widehat{\beta}$ as a proxy of gaussian measurments with a bit loss of rigor.
+We adopt a unified \emph{empirical partially Bayes} framework for large-scale testing problems where, for each unit $i=1,\dots,n$, one observes a summary pair $(Z_i,S_i^2)$ with
+$$
+Z_i\mid(\mu_i,\sigma_i^2)\sim N(\mu_i,\sigma_i^2),\qquad
+S_i^2\mid\sigma_i^2\sim (\sigma_i^2/\nu)\chi^2_\nu.
+$$
+The goal is to test $H_i:\mu_i=0$ while accounting for uncertainty in the nuisance variances.
+The oracle partially Bayes analyst posits a prior $G$ for $\sigma_i^2$ and defines the conditional two-sided $p$-value
+$$
+P_G(Z_i,S_i^2)
+= \mathbb{E}_G\!\left[\,2\{1-\Phi(|Z_i|/\sigma)\}\mid S_i^2\right],
+$$
+which is uniform under $H_i$ both conditionally and unconditionally on $S_i^2$.
+The \texttt{limma} method corresponds to the parametric choice
+$$
+\frac{1}{\sigma_i^2}\sim \frac{1}{\nu_0 s_0^2}\chi^2_{\nu_0},
+$$
+leading to the \emph{moderated variance}
+$$
+\tilde s_i^2=\frac{\nu_0 s_0^2+\nu S_i^2}{\nu_0+\nu},\qquad
+\tilde t_i=\frac{Z_i}{\tilde s_i},
+$$
+and the moderated-$t$ $p$-value
+$$
+P_{\mathrm{limma},\,\nu_0,s_0^2}(Z_i,S_i^2)
+=2\,\bar F_{t,\nu_0+\nu}(|\tilde t_i|),
+$$
+where $\bar F_{t,\kappa}$ denotes the survival function of a $t$ distribution with $\kappa$ degrees of freedom.
+This is exactly equal to $P_G(Z_i,S_i^2)$ for the inverse--scaled--$\chi^2$ prior, thus showing that
+\texttt{limma} is a parametric special case of conditional partially Bayes inference.
+
+
+The paper generalizes this approach by replacing the parametric prior $G$ with the
+nonparametric maximum-likelihood estimate (NPMLE)
+$$
+\widehat G \in \arg\max_G\sum_{i=1}^n\log f_G(S_i^2),\qquad
+f_G(s^2)=\int_0^\infty p(s^2\mid\sigma^2,\nu)\,dG(\sigma^2),
+$$
+where $p(s^2\mid\sigma^2,\nu)$ is the scaled-$\chi^2$ density.
+The resulting plug-in $p$-values $P_{\widehat G}(Z_i,S_i^2)$ inherit the oracle’s conditional uniformity asymptotically
+and can be computed efficiently since $\widehat G$ is discrete with at most $n$ support points.
+
+The complete multiple-testing pipeline (\emph{Algorithm~1}) is as follows:
+\begin{enumerate}
+  \item Estimate $G$ from the sample variances $\{S_i^2\}$---parametrically (as in \texttt{limma}) or nonparametrically via NPMLE.
+  \item Compute the conditional $p$-values $P_i=P_{\widehat G}(Z_i,S_i^2)$.
+  \item Apply the Benjamini--Hochberg procedure at level $\alpha$:
+  reject all $H_i$ such that $P_i\le P_{(k^\star)}$, where
+  $$
+  k^\star=\max\Bigl\{\ell:P_{(\ell)}\le\alpha\ell/n\Bigr\}.
+  $$
+\end{enumerate}
+
+Under the hierarchical model where $\sigma_i^2\stackrel{\mathrm{iid}}{\sim}G$, these plug-in $p$-values are asymptotically uniform,
+so BH controls the false discovery rate at approximately $\alpha n_0/n$ with nearly parametric error rate
+$\mathcal{N}((\log n)^{5/2}/\sqrt{n})$.
+Even in the compound setting with fixed variances, the same algorithm achieves
+\emph{average significance} and asymptotic FDR control.
+Thus, \texttt{limma} emerges as the parametric member of a broader empirical partially Bayes family,
+while the NPMLE variant provides model-robust and theoretically justified $p$-values for large-scale inference.
