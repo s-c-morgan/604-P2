@@ -143,4 +143,32 @@ illustrating region-specific expression changes associated with aging. From each
 
 The DLPFC exhibits the strongest differential expression, ANCG shows moderate immune-related changes, and CB remains relatively stable.
 
+# Multiple testing adjustment
+In summary, the empirical‐Bayes multiple testing results reveal that age‐related transcriptional effects vary substantially across brain regions. 
+\begin{figure}[htbp]
+\includegraphics[width=\textwidth]{q_hist_limma.pdf}
+\caption{
+BH q-values from limma empirical Bayes.
+}
+\label{fig:limma_q}
+\end{figure}
+
+The anterior cingulate cortex (ANCG) exhibits the strongest association between gene expression and age, with around 60 significant discoveries at a 5% FDR threshold under both the limma and NPMLE frameworks (Figure \ref{fig:limma_q} and \ref{fig:npml_q}). 
+This indicates robust and consistent age‐dependent expression patterns in this region. In contrast, the cerebellum (CB) shows no significant findings, suggesting either biological stability or limited statistical power, 
+while the dorsolateral prefrontal cortex (DLPFC) displays only a few significant genes, implying a weaker or more localized effect. 
+
+\begin{figure}[htbp]
+\includegraphics[width=\textwidth]{q_hist_npml}
+\caption{
+BH q-values from non-parametric MLE empirical Bayes.
+}
+\label{fig:npml_q}
+\end{figure}
+
+Comparing the two correction methods, the limma moderated t‐test (which assumes a parametric inverse‐Gamma prior on variances) and the NPMLE partially‐Bayes approach (which nonparametrically estimates the prior via Kiefer–Wolfowitz EM) yield nearly identical results, 
+highlighting that the simple parametric assumption is sufficient here. 
+The slight increase in discoveries under NPMLE in ANCG suggests mild across‐gene heteroscedasticity but not enough to change the overall conclusions. 
+Together, these results indicate that aging‐related transcriptional regulation is region‐specific, statistically stable across EB methods, and most pronounced in the ANCG, where age variation and sample size likely confer higher detection power.
+
+
 # Conclusion
