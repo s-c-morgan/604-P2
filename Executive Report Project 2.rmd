@@ -1,44 +1,16 @@
 ---
 title: "Project 2 Executive Report"
-author: ""
-date: "2025-10-09"
+author: "Jiwoon Han, Hanbin Lee, Yue Yu, Carlyle Morgan"
+date: "2025-10-10"
 output: pdf_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)
-library(ggplot2)
-library(lme4)
-library(fixest)
-library(grid)
-library(gridExtra)
-```
-
-```{r data preprocessing, include=FALSE}
-load("brain.rda")
-# Cerebellum (cb) - use logical indexing directly
-cb_mask <- arraymeta$region.cb == 1
-cb_arraymeta <- arraymeta[cb_mask, ]
-cb_expression <- expression[cb_mask, ]
-
-# Anterior cingulate (ANCG)
-ANCG_mask <- arraymeta$region.ANCG == 1
-ANCG_arraymeta <- arraymeta[ANCG_mask, ]
-ANCG_expression <- expression[ANCG_mask, ]
-
-# Dorsolateral prefrontal cortex (dlpfc)
-dlpfc_mask <- arraymeta$region.dlpfc == 1
-dlpfc_arraymeta <- arraymeta[dlpfc_mask, ]
-dlpfc_expression <- expression[dlpfc_mask, ]
-```
-
 # Introduction
 
-We identified several promising genes for future study into aging in the human brain. According to our analysis, we would suggest further examiniation of 20 genes from across three sites in the human brain. From the ACG region... These genes have demonstrated statistically signficant expression between patients less than 65 and those 65 and older at the $alpha =...$ level.
+We identified several promising genes for future study into aging in the human brain. According to our analysis, we would suggest further examiniation of 14 genes from across three sites in the human brain. From the ACG region... These genes have demonstrated statistically signficant expression between patients less than 70 and those 70 and older at the $\alpha = 0.05$ level.
 
 These results were obtained through versions of a linear model adapted to each brain region studied in our sample, as we observed stark differences between the expression of genes based on their location in the brain. The justification for and specification and interpretation of these models will follow in the following sections.
-
+ 
 ## Exploratory Data Analysis
 
 The distribution of the available data makes pairwise analysis difficult. If we wished to compare gene expressions for older and younger people for the same brain region and lab site using this method, we would run into complications quickly. Referring to the table below, one can see glaring sparsity at the region-lab level. For example, genes from the ANCG region are completely absent from analysis conducted at Davis lab. 
@@ -103,7 +75,7 @@ ANCG & CB & DLPFC \\
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\textwidth]{top_4_genes_by_region_4x3.pdf}
+\includegraphics[width=0.8\textwidth]{top_4_genes_by_region_4x3.pdf}
 \caption{Visualization of the top significant genes from each region-specific model.}
 \label{fig:top_genes}
 \end{figure}
@@ -115,7 +87,7 @@ For ANCG, genes such as HLA-DPA1 and CD74 show clear difference in the older gro
 Overall, these region-specific patterns suggest that the DLPFC is most transcriptionally sensitive to aging, whereas ANCG and CB show more limited sets of age-related genes. Also, the genes identified as significant within each region were generally not significant in other regions, suggesting that age‐related expression changes are largely region‐specific.
 
 \begin{figure}[htbp]
-\includegraphics[width=\textwidth]{Figures/ancg_top20_genes.png}
+\includegraphics[width=0.8\textwidth]{Figures/ancg_top20_genes.png}
 \caption{
 Heatmap of the top 20 age-associated genes in ANCG.
 }
@@ -123,7 +95,7 @@ Heatmap of the top 20 age-associated genes in ANCG.
 \end{figure}
 
 \begin{figure}[htbp]
-\includegraphics[width=\textwidth]{Figures/cb_top20_genes.png}
+\includegraphics[width=0.8\textwidth]{Figures/cb_top20_genes.png}
 \caption{
 Heatmap of the top 20 age-associated genes in CB.
 }
@@ -131,7 +103,7 @@ Heatmap of the top 20 age-associated genes in CB.
 \end{figure}
 
 \begin{figure}[htbp]
-\includegraphics[width=\textwidth]{Figures/dlpfc_top20_genes.png}
+\includegraphics[width=0.8\textwidth]{Figures/dlpfc_top20_genes.png}
 \caption{
 Heatmap of the top 20 age-associated genes in the DLPFC.
 }
@@ -146,7 +118,7 @@ The DLPFC exhibits the strongest differential expression, ANCG shows moderate im
 # Multiple testing adjustment
 In summary, the empirical‐Bayes multiple testing results reveal that age‐related transcriptional effects vary substantially across brain regions. 
 \begin{figure}[htbp]
-\includegraphics[width=\textwidth]{q_hist_limma.pdf}
+\includegraphics[width=0.8\textwidth]{q_hist_limma.pdf}
 \caption{
 BH q-values from limma empirical Bayes.
 }
@@ -158,7 +130,7 @@ This indicates robust and consistent age‐dependent expression patterns in this
 while the dorsolateral prefrontal cortex (DLPFC) displays only a few significant genes, implying a weaker or more localized effect. 
 
 \begin{figure}[htbp]
-\includegraphics[width=\textwidth]{q_hist_npml}
+\includegraphics[width=0.8\textwidth]{q_hist_npml}
 \caption{
 BH q-values from non-parametric MLE empirical Bayes.
 }
@@ -170,16 +142,19 @@ highlighting that the simple parametric assumption is sufficient here.
 The slight increase in discoveries under NPMLE in ANCG suggests mild across‐gene heteroscedasticity but not enough to change the overall conclusions. 
 Together, these results indicate that aging‐related transcriptional regulation is region‐specific, statistically stable across EB methods, and most pronounced in the ANCG, where age variation and sample size likely confer higher detection power.
 
+\newpage
 
 # Conclusion
 
 We found no statistically significant genes in the CB region.
+
 In the DLPFC region, we found GJA1 and GFAP to pass the threshold.
-According to the literature, GJA1 encodes a gap junction protein essential for direct cell-to-cell communication and rapid electrical signaling, particularly crucial for the synchronized contraction of the heart and GFAP encodes the main intermediate filament protein of central nervous system astrocytes, providing structural support to the brain and serving as a key marker for cellular response to injury (gliosis).
-Although GFAP has a known function in the brain, it is unclear why GJA1 appeared in our analysis.
+According to the literature, GJA1 encodes a gap junction protein essential for direct cell-to-cell communication and rapid electrical signaling, particularly crucial for the synchronized contraction of the heart and GFAP encodes the main intermediate filament protein of central nervous system astrocytes, providing structural support to the brain and serving as a key marker for cellular response to injury (gliosis). Although GFAP has a known function in the brain, it is unclear why GJA1 appeared in our analysis.
 Nevertheless, the gene also appeared significant in the ANCG region.
+
 In the ANCG region, we found GJA1, PLSCR4, AQP4, EFEMP1, ID4, NTRK2, AHCYL1, ERBB2IP, GFAP, AGXT2L1, RHOBTB3, AQP1, PPAP2B, and EDNRB to be significant.
 The two genes, GJA1 and GFAP that appeared in the DLPFC region were also found in this region.
 For other 12 genes, AQP4 and AQP1 are both genes that carry water molecules and are known to have roles in the astrocyte.
 NTRK2 encodes a receptor for brain-derived neurotrophic factor (BDNF) that, upon activation, plays a critical role in neuron survival, differentiation, and synaptic plasticity.
+
 We did not find immediate relationship of other genes to the central nervous system.
