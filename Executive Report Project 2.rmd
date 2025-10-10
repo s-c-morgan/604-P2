@@ -73,13 +73,13 @@ Our proposed solution for adjusting for these data distribution imbalances is th
 # Methodology
 
 ## Simple Linear Regression
-Based on the three brain regions (ANCG, CB, and DLPFC), we fit separate models for each region dataset:
+For each of the three brain regions (ANCG, CB, and DLPFC), we fit the following regression separtely:
 $$\text{gene expression} = \beta_0 + \beta_1 \text{age indicator} + \beta_2 \text{lab} + \beta_3 \text{sex} + \beta_4 \text{array version} + \varepsilon.$$
 The age indicator equals 1 if age $\ge 70$ and 0 otherwise. Gene expression is measured as $\log_2$ fold change, so a one-unit increase in a predictor multiplies expression by $2^{\beta}$ on average (e.g., $2^{\beta_1}$ for the age indicator).
 
-We analyze regions separately because differential expression depends on tissue: ANCG lies deep in the front–midline of the brain, CB sits at the back/bottom of the head, and DLPFC is on the outer upper frontal lobe. These regions differ in cell-type composition and function, so stratifying by region avoids confounding and implicit interaction effects with other covariates.
+We analyze regions separately because differential expression depends on tissue: ANCG lies deep in the front–midline of the brain, CB sits at the back/bottom of the head, and DLPFC is on the outer upper frontal lobe. These regions differ in cell-type composition and function, so stratifying by region avoids potential confounding and interaction effects with other covariates.
 
-Our goal is to identify genes whose expression differs by age within each region. Accordingly, we focus on $\beta_1$ and its associated p-value to assess whether the age indicator is a significant predictor of expression.
+Our goal is to identify genes in which the expression differs by age within each region. Accordingly, we focus on $\beta_1$ and its associated p-value to assess whether the age indicator is a significant predictor of expression.
 
 # Results
 
