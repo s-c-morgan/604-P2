@@ -608,6 +608,14 @@ plots_limma$q_hist
 plots_npml$p_hist
 plots_npml$q_hist
 
+
+library(ggplot2)
+
+ggsave("p_hist_limma.pdf", plot = plots_limma$p_hist, device = cairo_pdf, width = 6, height = 4, units = "in")
+ggsave("q_hist_limma.pdf", plot = plots_limma$q_hist, device = cairo_pdf, width = 6, height = 4, units = "in")
+ggsave("p_hist_npml.pdf",  plot = plots_npml$p_hist,  device = cairo_pdf, width = 6, height = 4, units = "in")
+ggsave("q_hist_npml.pdf",  plot = plots_npml$q_hist,  device = cairo_pdf, width = 6, height = 4, units = "in")
+
 ```
 
 
