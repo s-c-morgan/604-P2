@@ -22,10 +22,10 @@ cb_mask <- arraymeta$region.cb == 1
 cb_arraymeta <- arraymeta[cb_mask, ]
 cb_expression <- expression[cb_mask, ]
 
-# Anterior cingulate (ancg)
-ancg_mask <- arraymeta$region.ancg == 1
-ancg_arraymeta <- arraymeta[ancg_mask, ]
-ancg_expression <- expression[ancg_mask, ]
+# Anterior cingulate (ANCG)
+ANCG_mask <- arraymeta$region.ANCG == 1
+ANCG_arraymeta <- arraymeta[ANCG_mask, ]
+ANCG_expression <- expression[ANCG_mask, ]
 
 # Dorsolateral prefrontal cortex (dlpfc)
 dlpfc_mask <- arraymeta$region.dlpfc == 1
@@ -44,7 +44,75 @@ These results were obtained through versions of a linear model adapted to each b
 
 
 # Methodology
+## Simple Linear Regression
+Based on the three brain regions (ANCG, CB, and DLPFC), we fit separate models for each region dataset:
+$$\text{gene expression} = \beta_0 + \beta_1 \text{age indicator} + \beta_2 \text{lab} + \beta_3 \text{sex} + \beta_4 \text{array version} + \varepsilon.$$
+The age indicator equals 1 if age $\ge 70$ and 0 otherwise. Gene expression is measured as $\log_2$ fold change, so a one-unit increase in a predictor multiplies expression by $2^{\beta}$ on average (e.g., $2^{\beta_1}$ for the age indicator).
+
+We analyze regions separately because differential expression depends on tissue: ANCG lies deep in the front–midline of the brain, CB sits at the back/bottom of the head, and DLPFC is on the outer upper frontal lobe. These regions differ in cell-type composition and function, so stratifying by region avoids confounding and implicit interaction effects with other covariates.
+
+Our goal is to identify genes whose expression differs by age within each region. Accordingly, we focus on $\beta_1$ and its associated p-value to assess whether the age indicator is a significant predictor of expression.
 
 # Results
+
+## Simple Linear Regression
+By checking the coefficient of age, the numbers of gene expressions that show significant difference with respect to the age were shown as:
+\begin{table}[ht]
+\centering
+\caption{Number of genes with significant age-associated differential expression by region.}
+\label{tab:age_de_counts}
+\begin{tabular}{|c|c|c|}
+\hline
+ANCG & CB & DLPFC \\
+\hline
+2 & 1 & 98 \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Volcano Plots.} We visualized this result with volcano plots of region-wise effect sizes, which plots the (coefficient, -log(p-value)). 
+
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{top_4_genes_by_region_4x3.pdf}
+\caption{Visualization of the top significant genes from each region-specific model.}
+\label{fig:top_genes}
+\end{figure}
+
+\textbf{Boxplots.} Figure \ref{fig:top_genes} shows boxplots of the top significant genes identified from each region-specific model. Each column corresponds to one brain region (ANCG, CB, and DLPFC), and within each panel the expression levels are compared between young (blue) and old (red) groups across all three regions.
+
+For ANCG, genes such as HLA-DPA1 and CD74 show clear difference in the older group. In CB, gene CAMKK2 exhibit small age-related effects. In DLPFC, a larger number of genes display noticeable age-associated differences.
+
+Overall, these region-specific patterns suggest that the DLPFC is most transcriptionally sensitive to aging, whereas ANCG and CB show more limited sets of age-related genes. Also, the genes identified as significant within each region were generally not significant in other regions, suggesting that age‐related expression changes are largely region‐specific.
+
+\begin{figure}[htbp]
+\includegraphics[width=\textwidth]{Figures/ancg_top20_genes.png}
+\caption{
+Heatmap of the top 20 age-associated genes in ANCG.
+}
+\label{fig:ancg_heatmap}
+\end{figure}
+
+\begin{figure}[htbp]
+\includegraphics[width=\textwidth]{Figures/cb_top20_genes.png}
+\caption{
+Heatmap of the top 20 age-associated genes in CB.
+}
+\label{fig:cb_heatmap}
+\end{figure}
+
+\begin{figure}[htbp]
+\includegraphics[width=\textwidth]{Figures/dlpfc_top20_genes.png}
+\caption{
+Heatmap of the top 20 age-associated genes in the DLPFC.
+}
+\label{fig:dlpfc_heatmap}
+\end{figure}
+
+\textbf{Heatmaps.} We draw three heatmaps for each model (Figures \ref{fig:ancg_heatmap}--\ref{fig:dlpfc_heatmap}),
+illustrating region-specific expression changes associated with aging. From each model, the top 20 significant genes were selected. Each column in the heatmap represents an individual sample ordered by age, and each row corresponds to one of the selected genes, ordered by statistical significance (most significant at the top).
+
+The DLPFC exhibits the strongest differential expression, ANCG shows moderate immune-related changes, and CB remains relatively stable.
 
 # Conclusion

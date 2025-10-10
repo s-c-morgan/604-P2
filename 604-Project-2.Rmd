@@ -54,12 +54,14 @@ unique_age_array <- unique_patients$age
 ggplot() +
   geom_histogram(aes(x = age_array, fill = "samples"),
                  alpha = 0.7, color = "black", bins = 20) +
-  geom_histogram(aes(x = unique_age_array, fill = "individuals"),
+  geom_histogram(aes(x = unique_age_array, fill = "individual"),
                  alpha = 0.7, color = "black", bins = 20) +
+  geom_vline(xintercept = 70, color = "red", linewidth = 1) +
   labs(x = "Age", y = "Count", fill = "Type") +
-  scale_fill_manual(values = c("samples" = "lightblue", "individuals" = "darkblue")) +
-  scale_x_continuous(breaks = seq(0, 100, 10)) +
-  theme_minimal()
+  scale_fill_manual(values = c("samples" = "lightblue", "individual" = "darkblue")) +
+  theme_minimal() +
+  annotate("text", x = 72, y = max(table(age_array)) * 0.8,
+           label = "age = 70", color = "red")
 
 ggsave("age_hist.pdf", width = 8, height = 6, dpi = 300)
 ```
@@ -68,159 +70,18 @@ ggsave("age_hist.pdf", width = 8, height = 6, dpi = 300)
 unique_patients[unique_patients$age < 70, ]
 ```
 
-## AFFX Zero Value Analysis
-
-```{r affx-zero-analysis}
-# Find all AFFX columns in the expression data
-affx_cols <- grep("^AFFX", colnames(expression), value = TRUE)
-cat("Found", length(affx_cols), "AFFX columns:\n")
-print(affx_cols)
-
-# Check for zero values in any AFFX column
-if(length(affx_cols) > 0) {
-  # Extract AFFX expression data
-  affx_data <- expression[, affx_cols, drop = FALSE]
-
-  # Find observations (rows) where ANY AFFX column has zero value
-  zero_affx_rows <- apply(affx_data, 1, function(row) any(row == 0))
-
-  cat("\nNumber of observations with zero in any AFFX column:", sum(zero_affx_rows), "\n")
-  cat("Total observations:", nrow(expression), "\n")
-  cat("Percentage with zero AFFX:", round(100 * sum(zero_affx_rows) / nrow(expression), 2), "%\n")
-
-  if(sum(zero_affx_rows) > 0) {
-    # Get the observation indices and metadata for problematic rows
-    zero_affx_indices <- which(zero_affx_rows)
-
-    cat("\nObservations with zero AFFX values:\n")
-
-    # Create summary table with metadata and which AFFX columns are zero
-    zero_summary <- data.frame(
-      Row_Index = zero_affx_indices,
-      Patient = arraymeta$patient[zero_affx_indices],
-      Age = arraymeta$age[zero_affx_indices],
-      Sex = arraymeta$sex[zero_affx_indices],
-      Region_CB = arraymeta$region.cb[zero_affx_indices],
-      Region_ANCG = arraymeta$region.ancg[zero_affx_indices],
-      Region_DLPFC = arraymeta$region.dlpfc[zero_affx_indices],
-      stringsAsFactors = FALSE
-    )
-
-    # Add columns showing which AFFX values are zero for each observation
-    for(col in affx_cols) {
-      zero_summary[[paste0(col, "_is_zero")]] <- affx_data[zero_affx_indices, col] == 0
-    }
-
-    print(zero_summary)
-
-    # Show the actual AFFX values for the problematic observations
-    cat("\nActual AFFX values for these observations:\n")
-    problematic_affx <- affx_data[zero_affx_indices, , drop = FALSE]
-    rownames(problematic_affx) <- zero_affx_indices
-    print(problematic_affx)
-
-  } else {
-    cat("\nNo observations found with zero AFFX values.\n")
-  }
-
-} else {
-  cat("\nNo AFFX columns found in the expression data.\n")
-}
-```
-
 ## Sex Distribution
 
 ```{r sex-distribution}
-sex_array <- arraymeta$sex
-unique_patients <- arraymeta[!duplicated(arraymeta$patient), ]
-unique_sex_array <- unique_patients$sex
-
-# Create sex distribution data
-sex_samples <- table(sex_array)
-sex_individuals <- table(unique_sex_array)
-
-# Create data frame for plotting
-sex_data <- data.frame(
-  Sex = rep(names(sex_samples), 2),
-  Count = c(as.numeric(sex_samples), as.numeric(sex_individuals)),
-  Type = rep(c("samples", "individuals"), each = length(sex_samples))
-)
-
-# Create bar chart
-ggplot(sex_data, aes(x = Sex, y = Count, fill = Type)) +
-  geom_bar(stat = "identity", position = "dodge", alpha = 0.7, color = "black") +
-  labs(x = "Sex", y = "Count", fill = "Type") +
-  scale_fill_manual(values = c("samples" = "lightcoral", "individuals" = "darkred")) +
-  theme_minimal() +
-  geom_text(aes(label = Count), position = position_dodge(width = 0.9),
-            vjust = -0.3, size = 3)
+sex_counts <- table(arraymeta$sex)
+barplot(sex_counts, main = "Sex Distribution", ylab = "Count",
+        col = c("lightcoral", "lightblue"))
 ```
 
 ## Gene Metadata
 
 ```{r gene-metadata}
 head(genemeta[, 1:10])
-```
-
-## Gene Expression NA Analysis
-
-```{r gene-expression-na-analysis}
-# Check for NA values in the expression matrix
-total_values <- nrow(expression) * ncol(expression)
-na_count <- sum(is.na(expression))
-na_percentage <- round(100 * na_count / total_values, 4)
-
-cat("Gene Expression NA Analysis:\n")
-cat("Total values in expression matrix:", total_values, "\n")
-cat("Number of NA values:", na_count, "\n")
-cat("Percentage of NA values:", na_percentage, "%\n")
-
-if(na_count > 0) {
-  # Find which rows (samples) have NAs
-  rows_with_na <- apply(expression, 1, function(row) any(is.na(row)))
-  cat("\nSamples with NA values:", sum(rows_with_na), "out of", nrow(expression), "\n")
-
-  # Find which columns (genes) have NAs
-  cols_with_na <- apply(expression, 2, function(col) any(is.na(col)))
-  cat("Genes with NA values:", sum(cols_with_na), "out of", ncol(expression), "\n")
-
-  if(sum(rows_with_na) > 0) {
-    cat("\nRow indices with NA values:\n")
-    print(which(rows_with_na))
-
-    # Show metadata for samples with NAs
-    cat("\nMetadata for samples with NA values:\n")
-    na_sample_metadata <- arraymeta[rows_with_na, c("patient", "age", "sex", "region.cb", "region.ancg", "region.dlpfc")]
-    print(na_sample_metadata)
-  }
-
-  if(sum(cols_with_na) > 0) {
-    cat("\nColumn indices with NA values (first 20):\n")
-    na_col_indices <- which(cols_with_na)
-    print(head(na_col_indices, 20))
-
-    # Show gene names if available
-    if(exists("genemeta") && nrow(genemeta) > 0) {
-      gene_names <- colnames(expression)[na_col_indices]
-      cat("\nGene names with NA values (first 20):\n")
-      print(head(gene_names, 20))
-    }
-  }
-
-  # Summary by NA pattern
-  cat("\nNA pattern summary:\n")
-  na_per_row <- rowSums(is.na(expression))
-  na_per_col <- colSums(is.na(expression))
-
-  cat("Samples with different numbers of NA genes:\n")
-  print(table(na_per_row))
-
-  cat("\nDistribution of NA counts per gene:\n")
-  print(summary(na_per_col))
-
-} else {
-  cat("\nNo NA values found in the expression data.\n")
-}
 ```
 
 ## Preprocessing
@@ -333,57 +194,6 @@ cat("Irvine:", sum(splits[['dlpfc_70+']]$lab.irvine), "\n")
 cat("Michigan:", sum(splits[['dlpfc_70+']]$lab.michigan), "\n")
 ```
 
-## Consolidated Lab Distribution Table
-
-```{r lab-distribution-table}
-# Create consolidated lab distribution table
-lab_distribution <- data.frame(
-  Region = character(),
-  Age_Group = character(),
-  Davis = numeric(),
-  Irvine = numeric(),
-  Michigan = numeric(),
-  Total = numeric(),
-  stringsAsFactors = FALSE
-)
-
-# Define regions and age groups
-regions_list <- c('cb', 'ancg', 'dlpfc')
-age_groups <- c('70-', '70+')
-
-# Loop through each combination and collect data
-for(region in regions_list) {
-  for(age_group in age_groups) {
-    split_name <- paste(region, age_group, sep='_')
-
-    davis_count <- sum(splits[[split_name]]$lab.davis)
-    irvine_count <- sum(splits[[split_name]]$lab.irvine)
-    michigan_count <- sum(splits[[split_name]]$lab.michigan)
-    total_count <- davis_count + irvine_count + michigan_count
-
-    # Add row to table
-    lab_distribution <- rbind(lab_distribution, data.frame(
-      Region = toupper(region),
-      Age_Group = age_group,
-      Davis = davis_count,
-      Irvine = irvine_count,
-      Michigan = michigan_count,
-      Total = total_count
-    ))
-  }
-}
-
-# Display the consolidated table
-cat("Lab Distribution by Region and Age Group:\n")
-print(lab_distribution)
-
-# Create a more formatted version
-library(knitr)
-kable(lab_distribution,
-      caption = "Lab Distribution by Brain Region and Age Group",
-      align = c('l', 'c', 'c', 'c', 'c', 'c'))
-```
-
 # Model Fitting and Results
 
 ## Linear Regression with Fixed Effects
@@ -404,7 +214,7 @@ lab <- arraymeta %>%
 covariates <- arraymeta %>%
     dplyr::select(patient, age, sex, arrayversion) %>%  # Select base covariates
     dplyr::mutate(lab = lab, region = region) %>%  # Add categorical lab and region
-    dplyr::mutate(age.indicator = ifelse(age > 70, 1, 0))  # Binary age indicator
+    dplyr::mutate(age.indicator = ifelse(age >= 70, 1, 0))  # Binary age indicator
 
 # Filter genes with chromosome information
 is.gene <- !is.na(genemeta["chrom",])
@@ -540,14 +350,6 @@ region_results[[region_name]] <- data.frame(
   cat("Top 10 genes in", region_name, ":\n")
   print(top_genes_region[, c("gene_symbol", "t_statistic", "effect_size")])
 }
-```
-
-## Region specific volcano plots
-```{r volcano-region}
-  region_results[[0]]
-
-
-
 ```
 
 ## Compare Results Across Regions
@@ -900,8 +702,8 @@ create_region_heatmap <- function(region_name, top_n_genes = 20) {
   region_data <- region_results[[region_name]]
   
   # Remove any duplicated genes and sort by p-value (lowest first)
-  region_data <- region_data[!duplicated(region_data$gene_symbol), ]
   region_data <- region_data[order(region_data$p_value), ]
+  region_data <- region_data[!duplicated(region_data$gene_symbol), ]
   
   # Take top genes
   top_genes_region <- head(region_data, top_n_genes)
